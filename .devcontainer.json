@@ -11,7 +11,7 @@
             "enableNonRootDocker": "true"
         }
     },
-    "postCreateCommand": "pip install --upgrade pip",
+    "postCreateCommand": "cd /workspaces/tacode && pip install --upgrade pip",
     "postStartCommand": "git config --global --add safe.directory ${containerWorkspaceFolder}",
     "customizations": {
         "vscode": {
