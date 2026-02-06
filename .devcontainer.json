@@ -8,7 +8,8 @@
         },
         "ghcr.io/devcontainers/features/docker-in-docker:2": {
             "version": "latest",
-            "enableNonRootDocker": "true"
+            "enableNonRootDocker": "true",
+            "moby": false
         }
     },
     "postCreateCommand": "cd /workspaces/tacode && pip install --upgrade pip",
