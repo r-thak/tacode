@@ -1,7 +1,7 @@
 import asyncio
 from playwright.async_api import async_playwright
 from bot import TacoBellBot
-from playwright_stealth import Stealth
+from playwright_stealth import stealth_async
 
 async def run():
     # Use Firefox UA
@@ -25,20 +25,8 @@ async def run():
         bot = TacoBellBot(context)
         await bot.start()
         
-        # Apply stealth with Firefox options
-        stealth = Stealth(
-            navigator_user_agent_override=ua,
-            navigator_platform_override="Linux x86_64; rv:121.0",
-            chrome_app=False,
-            chrome_csi=False,
-            chrome_load_times=False,
-            chrome_runtime=False,
-            webgl_vendor_override='Mozilla',
-            webgl_renderer_override='Mozilla',
-            sec_ch_ua=False,
-            sec_ch_ua_override="",
-        )
-        await stealth.apply_stealth_async(bot.page)
+        # Apply stealth to the page
+        await stealth_async(bot.page)
         
         # simulated flow
         await bot.navigate_to_signup()
