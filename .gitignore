@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.toast
+.lucid
+.pytest_cache/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.local-browsers/
+
+# Project generated files
+*.png
+page_source*.html
+navigation_error.png
+registration_*.png
+temp_mail_*.png
+
+# Docker
+.docker/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
