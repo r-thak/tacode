@@ -54,16 +54,31 @@ class TacoBellBot:
         try:
             # Enter Email
             email_input = self.page.locator("input[name='email']")
-            await email_input.wait_for(state="visible")
+            await email_input.wait_for(state="visible", timeout=10000)
             await email_input.click()
+            await email_input.fill("") # Clear just in case
             await email_input.press_sequentially(email, delay=100)
             
-            # Submit
-            await self.page.keyboard.press("Enter")
-            # Wait for transition to name/password fields or verification step
-            await self.page.wait_for_timeout(5000)
+            # Click Confirm button (more reliable than just pressing Enter)
+            confirm_button = self.page.locator("button:has-text('CONFIRM')").first
+            await confirm_button.wait_for(state="visible", timeout=5000)
+            await confirm_button.click()
+            
+            print("Email submitted. Waiting for page transition...")
+            
+            # Wait for success - usually transitions to "Verify Your Email"
+            # Or at least wait for the loading indicator to disappear/new content to appear
+            try:
+                await self.page.wait_for_selector("text=Verify Your Email", timeout=30000)
+                print("Successfully reached verification step.")
+            except Exception:
+                # If it didn't find the text, maybe it's still loading or showed an error
+                print("Could not confirm 'Verify Your Email' text. Checking for errors...")
+                await self.page.screenshot(path="registration_transition_check.png")
+                # Check if we are still on the same page but it's not loading anymore
+                # or if a different message appeared.
+
             await self.page.screenshot(path="registration_step2.png")
-            print("Email submitted. Proceeding to next step...")
 
         except Exception as e:
             print(f"Registration failed at email step: {e}")

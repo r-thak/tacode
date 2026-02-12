@@ -16,11 +16,19 @@ class EmailService:
 
     def get_email(self):
         """Generates a new temporary email address."""
-        # Get list of domains
-        domains = requests.get(f"{self.api_url}?action=getMessages&login=demo&domain=1secmail.com").json()
         # 1secmail has specific domains we can use
         reg_domains = requests.get(f"{self.api_url}?action=getDomainList").json()
-        self.domain = reg_domains[0]
+        
+        # Filter out domains that are commonly blocked (like 1secmail.com/net/org)
+        # We found that domains like vjuum.com or laafd.com bypass the Taco Bell hang.
+        filtered_domains = [d for d in reg_domains if "1secmail" not in d]
+        
+        if filtered_domains:
+            # Prefer the non-obvious domains
+            self.domain = filtered_domains[0]
+        else:
+            self.domain = reg_domains[0]
+
         # Generate a random login name (e.g., taco12345)
         self.login = f"taco{int(time.time())}"
         self.email = f"{self.login}@{self.domain}"
