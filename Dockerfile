@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt
 
 # Ensure playwright browsers are installed
-RUN playwright install firefox
+RUN playwright install --with-deps
 
 COPY . .
 

@@ -1,14 +1,27 @@
-
 import asyncio
+import os
+import logging
 from playwright.async_api import async_playwright
 from bot import TacoBellBot
-from playwright_stealth import Stealth
+from playwright_stealth import stealth_async
+
+# Configure logging
+os.makedirs("debug", exist_ok=True)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler("debug/bot.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 async def run():
-    ua = 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0'
+    ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
     
     async with async_playwright() as p:
-        browser = await p.firefox.launch(headless=True)
+        browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
             user_agent=ua,
             viewport={'width': 1280, 'height': 720},
@@ -17,7 +30,7 @@ async def run():
         
         bot = TacoBellBot(context)
         await bot.start()
-        await Stealth().apply_stealth_async(bot.page)
+        await stealth_async(bot.page)
         
         try:
             # 1. Get temporary email
@@ -30,10 +43,10 @@ async def run():
             })
             
             # 3. Wait for verification code
-            print("Checking inbox for verification email...")
+            logger.info("Checking inbox for verification email...")
             try:
                 code = await bot.wait_for_verification_code()
-                print(f"VERIFICATION CODE: {code}")
+                logger.info(f"VERIFICATION CODE: {code}")
                 
                 # 4. Complete signup
                 await bot.complete_signup({
@@ -43,14 +56,14 @@ async def run():
                 }, code)
                 
             except Exception as e:
-                print(f"Email verification failed: {e}")
+                logger.error(f"Email verification failed: {e}")
             
         except Exception as e:
-            print(f"An error occurred: {e}")
+            logger.error(f"An error occurred: {e}")
         
         finally:
             await browser.close()
-            print("Bot session finished.")
+            logger.info("Bot session finished.")
 
 if __name__ == "__main__":
     asyncio.run(run())
