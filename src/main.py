@@ -4,7 +4,6 @@ import logging
 import random
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 from playwright.async_api import async_playwright
 from bot import TacoBellBot
