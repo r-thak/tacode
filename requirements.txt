@@ -2,3 +2,5 @@ playwright==1.41.2
 pytest==8.0.0
 playwright-stealth==1.0.6
 requests
+mailslurp-client
+python-dotenv

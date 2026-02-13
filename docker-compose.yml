@@ -1,5 +1,3 @@
-
-
 services:
   bot:
     build: .
@@ -7,5 +5,4 @@ services:
       - .:/app
     environment:
       - PYTHONUNBUFFERED=1
-    # Keep container running for development/debugging if needed
     command: tail -f /dev/null

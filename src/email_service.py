@@ -1,96 +1,80 @@
-import requests
-import time
-import re
 import logging
-import uuid
+import os
+import re
+import mailslurp_client
+from mailslurp_client.rest import ApiException
 
 logger = logging.getLogger(__name__)
-
-class EmailService:
-    """
-    Service to handle temporary email addresses using Mail.tm API.
-    More robust than 1secmail for automated testing.
-    """
+    
+class EmailService: # Handle email using MailSlurp API
     def __init__(self):
-        self.api_url = "https://api.mail.tm"
+        self.api_key = os.environ.get("MAILSLURP_API_KEY")
+        if not self.api_key:
+            raise Exception("MAILSLURP_API_KEY environment variable not set")
+            
+        configuration = mailslurp_client.Configuration()
+        configuration.api_key['x-api-key'] = self.api_key
+        self.api_client = mailslurp_client.ApiClient(configuration)
+        self.inbox_controller = mailslurp_client.InboxControllerApi(self.api_client)
+        self.wait_controller = mailslurp_client.WaitForControllerApi(self.api_client)
         self.email = None
-        self.token = None
-        self.account_id = None
-        self.password = str(uuid.uuid4()) # Random password for the temp account
+        self.inbox_id = None
+        self.session_id = None
 
-    def get_email(self):
-        """Creates a new temporary email account on Mail.tm."""
+    def get_email(self): # Creates a new inbox on MailSlurp
         try:
-            # 1. Get available domains
-            domains_res = requests.get(f"{self.api_url}/domains")
-            domains_res.raise_for_status()
-            domain = domains_res.json()['hydra:member'][0]['domain']
-            
-            # 2. Create account
-            self.email = f"taco_{uuid.uuid4().hex[:10]}@{domain}"
-            account_data = {
-                "address": self.email,
-                "password": self.password
-            }
-            create_res = requests.post(f"{self.api_url}/accounts", json=account_data)
-            create_res.raise_for_status()
-            self.account_id = create_res.json()['id']
-            
-            # 3. Get JWT Token
-            token_res = requests.post(f"{self.api_url}/token", json=account_data)
-            token_res.raise_for_status()
-            self.token = token_res.json()['token']
-            
-            logger.info(f"Generated Mail.tm email: {self.email}")
+            inbox = self.inbox_controller.create_inbox()
+            self.email = inbox.email_address
+            self.inbox_id = inbox.id
+            self.session_id = f"{self.inbox_id}" # Store inbox ID for later
+            logger.info(f"Generated MailSlurp email: {self.email}")
             return self.email
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize Mail.tm account: {e}")
+        except ApiException as e:
+            logger.error(f"Failed to create MailSlurp inbox: {e}")
             raise
 
-    def check_inbox(self):
-        """Checks for new messages in the Mail.tm inbox."""
-        if not self.token:
-            return []
-        
-        headers = {"Authorization": f"Bearer {self.token}"}
-        try:
-            response = requests.get(f"{self.api_url}/messages", headers=headers)
-            response.raise_for_status()
-            return response.json()['hydra:member']
-        except Exception as e:
-            logger.error(f"Error checking Mail.tm inbox: {e}")
-            return []
+    def login(self, email, session_id): # Restores session
+        self.email = email
+        self.inbox_id = session_id 
+        self.session_id = session_id
+        return True
 
-    def get_message_content(self, msg_id):
-        """Retrieves the full content of a specific message."""
-        headers = {"Authorization": f"Bearer {self.token}"}
+    def wait_for_verification_code(self, timeout=300000):
+        logger.info(f"Polling MailSlurp ({self.email}) for verification email...")
         try:
-            response = requests.get(f"{self.api_url}/messages/{msg_id}", headers=headers)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Error reading message {msg_id}: {e}")
-            return {}
+            email = self.wait_controller.wait_for_latest_email(
+                inbox_id=self.inbox_id,
+                timeout=int(timeout),
+                unread_only=True
+            )
+            
+            body = email.body or ""
+            subject = email.subject or ""
+            logger.debug(f"Email received. Subject: {subject}")
+            
+            def find_code(text):
+                matches = re.finditer(r"\b(\d{6})\b", str(text))
+                candidates = []
+                for match in matches:
+                    val = match.group(1)
+                    if val != "000000":
+                        candidates.append(val)
+                return candidates
 
-    def wait_for_verification_code(self, timeout=300):
-        """Polls the inbox for a verification code."""
-        logger.info("Polling Mail.tm for verification email...")
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            messages = self.check_inbox()
-            for msg in messages:
-                # Mail.tm messages have a 'subject' and 'intro' usually containing the code
-                # But we'll fetch the full body to be sure
-                content = self.get_message_content(msg['id'])
-                body = content.get('text', '') or content.get('html', '')
+            codes = find_code(body)
+            if not codes:
+                codes = find_code(subject)
+            
+            if codes:
+                code = codes[0]
+                logger.info(f"Code found: {code}")
+                return code
+            else:
+                logger.warning(f"Email received but no valid code found.\nSubject: {subject}\nBody Preview: {body[:200]}")
+                with open("debug_email_body.txt", "w") as f:
+                    f.write(body)
+                raise Exception("Email received but code not found (ignored 000000).")
                 
-                # Search for a 6-digit code
-                match = re.search(r"\b(\d{6})\b", str(body))
-                if match:
-                    code = match.group(1)
-                    logger.info(f"Code found: {code}")
-                    return code
-                
-            time.sleep(10)
-        raise Exception("Timed out waiting for verification email.")
+        except ApiException as e:
+            logger.error(f"MailSlurp wait failed: {e}")
+            raise Exception(f"Timed out waiting for verification email: {e}")

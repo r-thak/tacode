@@ -22,3 +22,5 @@ pip-delete-this-directory.txt
 *.swp
 *.swo
 /debug/*
+accounts.sqlite
+.env

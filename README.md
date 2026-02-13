@@ -12,9 +12,15 @@ docker-compose up -d --build
 docker-compose exec bot python src/main.py
 ```
 
-### Option 2: Local Installation
+### Option 2: Source
 ```bash
 pip install -r requirements.txt
 playwright install chromium --with-deps
 python src/main.py
+```
+
+## Tools
+### Get verification code
+```bash
+python src/get_code.py <email_address>
 ```
