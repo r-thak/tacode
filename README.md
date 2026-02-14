@@ -19,7 +19,7 @@ python src/server.py
 ```
 
 ## API Endpoints
-The server runs on port `15552` by default. Endpoint rate limit of 5reqs/15min.
+The server runs on port `15552` by default. Endpoint rate limit of 5reqs/15min. Modify CORS if you want to serve this on a different port or domain.
 
 ### `POST /dispense`
 Starts the automated registration process.
