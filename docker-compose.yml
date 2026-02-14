@@ -5,4 +5,5 @@ services:
       - .:/app
     environment:
       - PYTHONUNBUFFERED=1
-    command: tail -f /dev/null
+    ports:
+      - "8000:8000"

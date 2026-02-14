@@ -13,6 +13,7 @@ class EmailService: # Handle email using MailSlurp API
             raise Exception("MAILSLURP_API_KEY environment variable not set")
             
         configuration = mailslurp_client.Configuration()
+        configuration.host = "https://api.mailslurp.com"
         configuration.api_key['x-api-key'] = self.api_key
         self.api_client = mailslurp_client.ApiClient(configuration)
         self.inbox_controller = mailslurp_client.InboxControllerApi(self.api_client)
@@ -23,7 +24,7 @@ class EmailService: # Handle email using MailSlurp API
 
     def get_email(self): # Creates a new inbox on MailSlurp
         try:
-            inbox = self.inbox_controller.create_inbox()
+            inbox = self.inbox_controller.create_inbox(use_short_address=True)
             self.email = inbox.email_address
             self.inbox_id = inbox.id
             self.session_id = f"{self.inbox_id}" # Store inbox ID for later

@@ -25,7 +25,9 @@ class TacoBellBot:
             raise Exception(f"No email password found for {email}")
         
         if self.email_service.login(email, account['email_password']):
-            return await self.wait_for_verification_code()
+            code = await self.wait_for_verification_code()
+            self.db.mark_account_used(email)
+            return code
         else:
             raise Exception(f"Failed to login to email account for {email}")
 
@@ -42,29 +44,26 @@ class TacoBellBot:
             raise Exception("Page not initialized.")
         
         # Cookies 🍪🥛
-        # Cookies 🍪🥛
-        home_url = "https://www.tacobell.com/"
-        logger.info(f"Visiting home page: {home_url}")
-        
         try:
-            response = await self.page.goto(home_url, timeout=60000)
-            if response and response.status == 403:
-                logger.error(f"Home page blocked (403 Forbidden). IP or Domain might be flagged.")
-            
-            await self.page.wait_for_load_state("networkidle")
-            await self.page.wait_for_timeout(random.randint(2000, 5000))
-    
             url = "https://www.tacobell.com/register/yum"
-            logger.info(f"Navigating to signup: {url}...")
+            logger.info(f"Navigating to signup directly: {url}...")
             
-            response = await self.page.goto(url, timeout=60000, referer="https://www.google.com/")
+            response = await self.page.goto(url, timeout=60000, referer="https://www.google.com/", wait_until="commit")
             if response and response.status == 403:
                 logger.error(f"Signup page blocked (403 Forbidden).")
                 
-            await self.page.wait_for_load_state("networkidle")
-            await self.page.wait_for_timeout(random.randint(5000, 10000))
+            try:
+                await self.page.wait_for_selector("input[name='email']", timeout=30000)
+            except Exception:
+                logger.warning("Email input not found immediately, checking if blocked or just slow...")
+
+            await self.page.wait_for_timeout(random.randint(2000, 5000))
         except Exception as e:
             logger.error(f"Navigation failed: {e}")
+            try:
+                await self.page.screenshot(path=os.path.join(self.debug_dir, "navigation_failure.png"), timeout=5000)
+            except:
+                pass
             raise
 
     async def handle_cookie_banner(self): # Handle cookie banner
@@ -135,7 +134,6 @@ class TacoBellBot:
             self.page.on("response", handle_response)
             
             try:
-                # Wait for either the success text OR a known error message
                 success_selector = "text=Verify Your Email"
                 await self.page.wait_for_selector(success_selector, timeout=30000)
                 logger.info("Successfully reached verification step.")
@@ -277,14 +275,13 @@ class TacoBellBot:
             await self.page.screenshot(path=os.path.join(self.debug_dir, "registration_final.png"))
             
             email = user_details.get("email") or self.email_address
-            password = user_details.get("password", "PASSWORDLESS")
             
             success = self.db.save_account(
                 email=email,
-                password=password,
                 email_password=self.email_service.session_id,
                 first_name=user_details.get("first_name", "Taco"),
-                last_name=user_details.get("last_name", "Lover")
+                last_name=user_details.get("last_name", "Lover"),
+                used=False
             )
             
             if success:

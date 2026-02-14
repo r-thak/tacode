@@ -7,7 +7,12 @@ from dotenv import load_dotenv
 load_dotenv()
 from playwright.async_api import async_playwright
 from bot import TacoBellBot
-from playwright_stealth import stealth_async
+try:
+    from playwright_stealth import stealth_async
+except ImportError:
+    from playwright_stealth import Stealth
+    async def stealth_async(page):
+        await Stealth().apply_stealth_async(page)
 
 os.makedirs("debug", exist_ok=True)
 logging.basicConfig(
