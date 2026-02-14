@@ -4,7 +4,7 @@ An automated account registration and management tool for Taco Bell.
 ## How?
 - Playwright stealth and randomization
 - Temp email using Mailslurp API (maybe will make my own temp email service later)
-- FastAPI
+- FastAPI + slowapi for rate limiting on account dispensing
 
 ### Option 1: [Docker](https://www.docker.com/)
 ```bash
