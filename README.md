@@ -6,7 +6,8 @@ An automated account registration and management tool for Taco Bell.
 - Temp email using Mailslurp API (maybe will make my own temp email service later)
 - FastAPI + slowapi for rate limiting on account dispensing
 
-### Option 1: [Docker](https://www.docker.com/) — Use docker compose, not docker-compose!!
+### Option 1: [Docker](https://www.docker.com/)
+Use 'docker compose', not 'docker-compose'! Verify that you have 'docker compose' installed by using 'docker compose version'
 ```bash
 docker compose up -d --build
 ```
