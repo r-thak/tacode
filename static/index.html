@@ -20,14 +20,13 @@
             --bg-color: #1a1a1a;
             --text-color: #f0f0f0;
             --accent-color: #80cca0;
-            --input-bg: #2a2a2a;
+            --input-bg: #1d1d1d;
             --border-color: #444;
             --line-color: #666;
         }
 
         * {
             box-sizing: border-box;
-            transition: background-color 0.3s, color 0.3s;
         }
 
         body {
@@ -176,7 +175,6 @@
             border-radius: 6px;
             cursor: pointer;
             font-size: 1rem;
-            text-transform: uppercase;
             letter-spacing: 0.05em;
             display: flex;
             align-items: center;
@@ -210,8 +208,6 @@
             padding: 0.8rem;
             background-color: transparent;
             color: var(--text-color);
-            font-size: 1.1rem;
-            font-family: monospace;
             border: 1px solid var(--border-color);
             border-radius: 6px;
         }
@@ -221,21 +217,7 @@
             outline: none;
         }
 
-        .result-text-input {
-            width: 100%;
-            padding: 0.8rem;
-            background-color: transparent;
-            color: var(--text-color);
-            font-size: 1.1rem;
-            font-family: monospace;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-        }
 
-        .result-text-input:focus {
-            border-color: var(--accent-color);
-            outline: none;
-        }
 
         .app-container {
             display: flex;
@@ -276,13 +258,10 @@
             font-size: 0.95rem;
         }
 
-        /* Adjust existing form container */
         .form-container {
-            /* Override absolute positioning if any (not present), just ensure it flows */
             flex: 1;
             width: 100%;
             max-width: 450px;
-            /* Slightly reduce max-width to fit nicely */
         }
 
         @media (max-width: 850px) {
@@ -294,7 +273,6 @@
             .instructions-container {
                 width: 100%;
                 max-width: 500px;
-                /* Match form max-width */
             }
         }
     </style>
@@ -307,7 +285,6 @@
     </div>
 
     <div class="app-container">
-        <!-- Instructions Section -->
         <div class="instructions-container">
             <h2>How to use</h2>
             <ol>
@@ -321,7 +298,6 @@
             </ol>
         </div>
 
-        <!-- Main Form Section -->
         <div class="form-container">
             <h1>Tacode</h1>
 
@@ -416,7 +392,7 @@
 
             btn.disabled = true;
             btn.innerText = "Dispensing...";
-            document.getElementById('getCodeBtn').disabled = true; // Disable during dispense
+            document.getElementById('getCodeBtn').disabled = true;
             status.innerText = "Initiating bot sequence...";
             status.className = "status-message";
 
@@ -442,7 +418,7 @@
 
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split("\n");
-                    buffer = lines.pop(); // Keep incomplete line
+                    buffer = lines.pop();
 
                     for (const line of lines) {
                         if (!line.trim()) continue;
@@ -483,7 +459,6 @@
             } finally {
                 btn.disabled = false;
                 btn.innerText = "Dispense Account";
-                // Only re-enable if it's not currently showing "Checking..." (which means getLoginCode is running)
                 const getCodeBtn = document.getElementById('getCodeBtn');
                 if (getCodeBtn.innerText !== "Checking...") {
                     getCodeBtn.disabled = false;
