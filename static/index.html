@@ -75,7 +75,7 @@
             gap: 1.5rem;
             align-items: center;
             z-index: 3;
-            background-color: var(--bg-color);
+            background-color: var(--input-bg);
             padding: 2rem;
             border: 1px solid var(--border-color);
             border-radius: 12px;
@@ -237,6 +237,68 @@
             border-color: var(--accent-color);
             outline: none;
         }
+
+        .app-container {
+            display: flex;
+            gap: 2rem;
+            align-items: flex-start;
+            justify-content: center;
+            width: 100%;
+            max-width: 1000px;
+            padding: 1rem;
+            z-index: 1;
+            margin-top: 2rem;
+            /* Give some space from top */
+        }
+
+        .instructions-container {
+            flex: 1;
+            max-width: 400px;
+            background-color: var(--bg-color);
+            padding: 2rem;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .instructions-container h2 {
+            font-size: 1.25rem;
+            margin-top: 0;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        .instructions-container ol {
+            padding-left: 1.5rem;
+            margin: 0;
+            line-height: 1.6;
+        }
+
+        .instructions-container li {
+            margin-bottom: 0.75rem;
+            font-size: 0.95rem;
+        }
+
+        /* Adjust existing form container */
+        .form-container {
+            /* Override absolute positioning if any (not present), just ensure it flows */
+            flex: 1;
+            width: 100%;
+            max-width: 450px;
+            /* Slightly reduce max-width to fit nicely */
+        }
+
+        @media (max-width: 850px) {
+            .app-container {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .instructions-container {
+                width: 100%;
+                max-width: 500px;
+                /* Match form max-width */
+            }
+        }
     </style>
 </head>
 
@@ -246,7 +308,22 @@
         <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()">Theme: Light</button>
     </div>
 
-    <div class="graph-container">
+    <div class="app-container">
+        <!-- Instructions Section -->
+        <div class="instructions-container">
+            <h2>How to use</h2>
+            <ol>
+                <li>Enter a name and press <strong>Dispense Account</strong>.</li>
+                <li>An account will automatically be created for you, but it will take a sec. While you're waiting, copy
+                    the email and open the Taco Bell app on your phone.</li>
+                <li>Once the "Get Login Code" button on this website isn't gray, paste the email into
+                    the Taco Bell app and press <strong>Log In</strong>.</li>
+                <li>Return to this website, copy the verification code, and paste & log into the Taco
+                    Bell app.</li>
+            </ol>
+        </div>
+
+        <!-- Main Form Section -->
         <div class="form-container">
             <h1>Tacode</h1>
 
