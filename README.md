@@ -7,8 +7,9 @@ An automated account registration and management tool for Taco Bell.
 - FastAPI + slowapi for rate limiting on account dispensing
 
 ### Option 1: [Docker](https://www.docker.com/)
+Use `docker compose`, not `docker-compose`! Verify that you have `docker compose` installed by using `docker compose version`
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ### Option 2: Source
@@ -19,7 +20,7 @@ python src/server.py
 ```
 
 ## API Endpoints
-The server runs on port `15552` by default. Endpoint rate limit of 5reqs/15min.
+The server runs on port `15552` by default. Endpoint rate limit of 5reqs/15min. Modify CORS if you want to serve this on a different port or domain.
 
 ### `POST /dispense`
 Starts the automated registration process.

@@ -11,6 +11,6 @@ RUN playwright install --with-deps
 
 COPY . .
 
-EXPOSE 15552
+EXPOSE 8000
 
 CMD ["python", "src/server.py"]
