@@ -1,4 +1,3 @@
-
 import os
 import logging
 from playwright.async_api import Page, BrowserContext
@@ -6,6 +5,8 @@ import asyncio
 import random
 from email_service import EmailService
 from database import Database
+
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,12 @@ class TacoBellBot:
 
     async def start(self): # Start new page and wait
         self.page = await self.context.new_page()
+
+        # Inject stealth scripts to bypass navigator checks
+        await self.page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        """)
+
         await self.page.set_viewport_size({"width": 1280, "height": 720})
 
     async def get_email(self) -> str: # Get temporary email
@@ -43,25 +50,53 @@ class TacoBellBot:
         if not self.page:
             raise Exception("Page not initialized.")
         
-        # Cookies 🍪🥛
         try:
-            url = "https://www.tacobell.com/register/yum"
-            logger.info(f"Navigating to signup directly: {url}...")
+            # 1. Start with Google to look less like a bot
+            logger.info("Miming human entry: visiting Google first...")
+            try:
+                await self.page.goto("https://www.google.com", timeout=30000, wait_until="domcontentloaded")
+                await self.page.wait_for_timeout(random.randint(1000, 3000))
+            except Exception as e:
+                logger.warning(f"Initial Google visit failed (non-critical): {e}")
+
+            # 2. Go to Taco Bell homepage
+            url_home = "https://www.tacobell.com/"
+            logger.info(f"Navigating to homepage: {url_home}...")
+            try:
+                await self.page.goto(url_home, timeout=45000, wait_until="domcontentloaded")
+                await self.page.wait_for_timeout(random.randint(2000, 4000))
+                # Human-like scroll
+                await self.page.mouse.wheel(0, random.randint(300, 700))
+                await self.page.wait_for_timeout(random.randint(1000, 2000))
+                await self.handle_cookie_banner()
+            except Exception as e:
+                logger.warning(f"Homepage navigation failed/timed out: {e}")
+
+            # 3. Finally, go to the signup page
+            url_signup = "https://www.tacobell.com/register/yum"
+            logger.info(f"Navigating to signup directly: {url_signup}...")
             
-            response = await self.page.goto(url, timeout=60000, referer="https://www.google.com/", wait_until="commit")
+            # Using longer timeout and load instead of commit for better resilience
+            response = await self.page.goto(url_signup, timeout=90000, referer="https://www.tacobell.com/", wait_until="load")
+            
             if response and response.status == 403:
                 logger.error(f"Signup page blocked (403 Forbidden).")
                 
             try:
+                # Wait for the email input specifically
                 await self.page.wait_for_selector("input[name='email']", timeout=30000)
+                logger.info("Successfully loaded signup page.")
             except Exception:
-                logger.warning("Email input not found immediately, checking if blocked or just slow...")
+                logger.warning("Email input not found, checking for blocking screens or errors...")
+                # await self.page.screenshot(path=os.path.join(self.debug_dir, "navigation_check.png"))
 
             await self.page.wait_for_timeout(random.randint(2000, 5000))
         except Exception as e:
             logger.error(f"Navigation failed: {e}")
             try:
-                await self.page.screenshot(path=os.path.join(self.debug_dir, "navigation_failure.png"), timeout=5000)
+                # Ensure debug dir exists before screenshotting
+                os.makedirs(self.debug_dir, exist_ok=True)
+                # await self.page.screenshot(path=os.path.join(self.debug_dir, f"navigation_failure_{int(asyncio.get_event_loop().time())}.png"), timeout=10000)
             except:
                 pass
             raise
@@ -119,9 +154,8 @@ class TacoBellBot:
 
             logger.info("Clicking CONFIRM button...")
             await confirm_button.hover()
-            await self.page.mouse.move(random.randint(-5, 5), random.randint(-5, 5), steps=5) # Micro-jitter
             await self.page.wait_for_timeout(random.randint(500, 1500))
-            await confirm_button.click()
+            await confirm_button.click(delay=random.randint(50, 150))
             
             logger.info("Email submitted. Waiting for page transition...")
             
@@ -139,7 +173,7 @@ class TacoBellBot:
                 logger.info("Successfully reached verification step.")
             except Exception:
                 logger.warning("Timed out waiting for 'Verify Your Email'. Checking for errors...")
-                await self.page.screenshot(path=os.path.join(self.debug_dir, "transition_timeout.png"))
+                # await self.page.screenshot(path=os.path.join(self.debug_dir, "transition_timeout.png"))
                 
                 domain_blocked = False
                 
@@ -164,14 +198,14 @@ class TacoBellBot:
                     logger.error("Click didn't transition and button is still visible. Possible silent block.")
                     domain_blocked = True
                 
-                if domain_blocked and self.email_address:
-                    domain = self.email_address.split('@')[-1]
-                    logger.info(f"Adding {domain} to blocked_domains.txt")
-                    try:
-                        with open("blocked_domains.txt", "a") as f:
-                            f.write(f"\n{domain}")
-                    except Exception as e:
-                        logger.error(f"Failed to update blocked_domains.txt: {e}")
+                # if domain_blocked and self.email_address:
+                #     domain = self.email_address.split('@')[-1]
+                #     logger.info(f"Adding {domain} to blocked_domains.txt")
+                #     try:
+                #         with open("blocked_domains.txt", "a") as f:
+                #             f.write(f"\n{domain}")
+                #     except Exception as e:
+                #         logger.error(f"Failed to update blocked_domains.txt: {e}")
                 
                 raise Exception("Registration hung or failed to transition.")
             finally:
@@ -179,7 +213,7 @@ class TacoBellBot:
 
         except Exception as e:
             logger.error(f"Registration failed at email step: {e}")
-            await self.page.screenshot(path=os.path.join(self.debug_dir, "registration_error.png"))
+            # await self.page.screenshot(path=os.path.join(self.debug_dir, "registration_error.png"))
             raise
 
     async def wait_for_verification_code(self) -> str: # BLOCKING CALL!! Polls for verification code
@@ -248,19 +282,21 @@ class TacoBellBot:
                             logger.info("Checked value-menu checkbox (only one found).")
 
                     # submit
-                    create_account_btn = self.page.locator("button:has-text('Create Account'), button:has-text('Sign Up'), button:has-text('Finish')")
-                    
-                    if await create_account_btn.first.is_visible():
-                        logger.info("Clicking 'Create Account' button...")
-                        await create_account_btn.first.click()
+                    # Try to find any submit button
+                    submit_btn = self.page.locator("button[type='submit']", has_text=re.compile(r"create|sign|finish|confirm|let's|save|continue", re.IGNORECASE)).first
+                    if not await submit_btn.is_visible():
+                        submit_btn = self.page.locator("button[type='submit']").first
+
+                    if await submit_btn.is_visible():
+                        logger.info("Found submit button. Clicking...")
+                        await submit_btn.wait_for(state="visible", timeout=5000)
+                        await submit_btn.click(delay=random.randint(50, 150))
                     else:
-                        logger.warning("'Create Account' button not found. Trying generic 'Confirm' button...")
-                        if await confirm_btn.is_visible():
-                            await confirm_btn.click()
-                        else: # Try to find any submit button
-                            submit_btn = self.page.locator("button[type='submit']").first
-                            if await submit_btn.is_visible():
-                                await submit_btn.click()
+                        logger.warning("No submit button found! Check screenshot.")
+                        create_account_btn = self.page.locator("button:has-text('Create Account'), button:has-text('Sign Up'), button:has-text('Finish')")
+                        if await create_account_btn.first.is_visible():
+                            logger.info("Clicking 'Create Account' button...")
+                            await create_account_btn.first.click()
                         
                     logger.info("Details submitted. Waiting for final transition...")
                     await self.page.wait_for_timeout(5000)
@@ -293,5 +329,5 @@ class TacoBellBot:
 
         except Exception as e:
             logger.error(f"Failed to complete signup: {e}")
-            await self.page.screenshot(path=os.path.join(self.debug_dir, "completion_error.png"))
+            # await self.page.screenshot(path=os.path.join(self.debug_dir, "completion_error.png"))
             raise

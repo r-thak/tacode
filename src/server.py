@@ -14,12 +14,6 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from playwright.async_api import async_playwright
-try:
-    from playwright_stealth import stealth_async
-except ImportError:
-    from playwright_stealth import Stealth
-    async def stealth_async(page):
-        await Stealth().apply_stealth_async(page)
 
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -76,19 +70,19 @@ async def run_bot_signup_stream(user_details: UserDetails):
     browser = None
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
+            # Enhanced anti-detection launch using Firefox
+            browser = await p.firefox.launch(
                 headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-http2'
-                ]
+                firefox_user_prefs={
+                    "dom.webdriver.enabled": False,
+                    "useAutomationExtension": False,
+                    "media.peerconnection.enabled": False,
+                }
             )
             
             context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
                 locale='en-US',
                 timezone_id='America/New_York',
                 permissions=['geolocation'],
@@ -104,8 +98,6 @@ async def run_bot_signup_stream(user_details: UserDetails):
             await bot.start()
             
             await bot.page.set_viewport_size({"width": 1920, "height": 1080})
-            
-            await stealth_async(bot.page)
             
             logger.info("Starting registration via API...")
             email = await bot.get_email()
@@ -149,17 +141,18 @@ async def dispense_account(request: Request, user_details: UserDetails):
 @limiter.limit("5/15 minute")
 async def get_login_code(request: Request, body: GetCodeRequest):
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
+        browser = await p.firefox.launch(
             headless=True,
-            args=[
-                '--disable-blink-features=AutomationControlled',
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-http2'
-            ]
+            firefox_user_prefs={
+                "dom.webdriver.enabled": False,
+                "useAutomationExtension": False,
+                "media.peerconnection.enabled": False,
+            }
         )
         try:
-            context = await browser.new_context()
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+            )
             current_dir = os.path.dirname(os.path.abspath(__file__))
             db_path = os.path.join(current_dir, "..", "accounts.sqlite")
             bot = TacoBellBot(context, db_path=db_path)

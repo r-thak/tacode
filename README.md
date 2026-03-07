@@ -13,6 +13,7 @@ docker compose up -d --build
 ```
 
 ### Option 2: Source
+Ideally use a virtual environment
 ```bash
 pip install -r requirements.txt
 playwright install chromium --with-deps
@@ -20,7 +21,7 @@ python src/server.py
 ```
 
 ## API Endpoints
-The server runs on port `15552` by default. Endpoint rate limit of 5reqs/15min. Modify CORS if you want to serve this on a different port or domain.
+The server runs on port `8000` by default, but the default port forwarded by docker is `15552`. Endpoint rate limit of 5reqs/15min. Modify CORS if you want to serve this on a different port or domain.
 
 ### `POST /dispense`
 Starts the automated registration process.
