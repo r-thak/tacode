@@ -14,7 +14,7 @@ async def main():
             print("Navigating...")
             await page.goto("https://www.tacobell.com/", wait_until="domcontentloaded", timeout=15000)
             print("Success")
-            await page.screenshot(path="test_tb.png")
+            # await page.screenshot(path="test_tb.png")
         except Exception as e:
             print(f"Error: {e}")
         finally:

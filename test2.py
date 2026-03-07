@@ -26,7 +26,7 @@ async def main():
                 print("Success!")
             except Exception as e:
                 print("Failed to verify:", e)
-                await page.screenshot(path="test2_failed.png")
+                # await page.screenshot(path="test2_failed.png")
             
         finally:
             await browser.close()

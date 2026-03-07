@@ -242,7 +242,7 @@ class TacoBellBot:
             logger.info("Verification code submitted. Waiting for next step...")
             await self.page.wait_for_timeout(5000)
             
-            await self.page.screenshot(path=os.path.join(self.debug_dir, "post_code_submission.png"))
+            # await self.page.screenshot(path=os.path.join(self.debug_dir, "post_code_submission.png"))
             
             try:
                 logger.info("Checking for Details form...")
@@ -293,9 +293,16 @@ class TacoBellBot:
                         await submit_btn.click(delay=random.randint(50, 150))
                     else:
                         logger.warning("No submit button found! Check screenshot.")
-                        create_account_btn = self.page.locator("button:has-text('Create Account'), button:has-text('Sign Up'), button:has-text('Finish')")
+                        
+                        buttons = await self.page.locator("button").all_inner_texts()
+                        logger.warning(f"All buttons: {buttons}")
+                        page_html = await self.page.content()
+                        with open("debug_page.html", "w") as f:
+                            f.write(page_html)
+
+                        create_account_btn = self.page.locator("button", has_text=re.compile(r"Create Account|Sign Up|Finish|Create", re.IGNORECASE))
                         if await create_account_btn.first.is_visible():
-                            logger.info("Clicking 'Create Account' button...")
+                            logger.info(f"Clicking '{await create_account_btn.first.inner_text()}' button...")
                             await create_account_btn.first.click()
                         
                     logger.info("Details submitted. Waiting for final transition...")
@@ -306,9 +313,9 @@ class TacoBellBot:
 
             except Exception as e:
                 logger.warning(f"Error handling details form wrapper: {e}")
-                await self.page.screenshot(path=os.path.join(self.debug_dir, "details_form_error.png"))
+                # await self.page.screenshot(path=os.path.join(self.debug_dir, "details_form_error.png"))
 
-            await self.page.screenshot(path=os.path.join(self.debug_dir, "registration_final.png"))
+            # await self.page.screenshot(path=os.path.join(self.debug_dir, "registration_final.png"))
             
             email = user_details.get("email") or self.email_address
             
