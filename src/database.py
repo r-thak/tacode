@@ -15,6 +15,7 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     email TEXT UNIQUE NOT NULL,
                     email_password TEXT,
+                    password TEXT,
                     first_name TEXT,
                     last_name TEXT,
                     used BOOLEAN DEFAULT 0,
@@ -27,6 +28,12 @@ class Database:
             
             if 'password' in columns:
                 pass
+
+            if 'password' not in columns:
+                try:
+                    cursor.execute("ALTER TABLE accounts ADD COLUMN password TEXT")
+                except Exception as e:
+                    print(f"Migration error (adding password column): {e}")
 
             if 'used' not in columns:
                 try:
@@ -78,3 +85,28 @@ class Database:
             print(f"Database error marking used: {e}")
             return False
 
+    def update_account(self, email, first_name=None, last_name=None, password=None):
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                updates = []
+                params = []
+                if first_name:
+                    updates.append("first_name = ?")
+                    params.append(first_name)
+                if last_name:
+                    updates.append("last_name = ?")
+                    params.append(last_name)
+                if password:
+                    updates.append("password = ?")
+                    params.append(password)
+                
+                if updates:
+                    params.append(email)
+                    query = f"UPDATE accounts SET {', '.join(updates)} WHERE email = ?"
+                    cursor.execute(query, tuple(params))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"Database error updating account: {e}")
+            return False

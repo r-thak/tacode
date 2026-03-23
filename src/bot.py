@@ -20,7 +20,7 @@ class TacoBellBot:
         self.db = Database(db_path)
         os.makedirs(self.debug_dir, exist_ok=True)
 
-    async def get_code_for_existing_account(self, email: str) -> str: # Get code from existing account
+    async def get_code_for_existing_account(self, email: str) -> str:
         account = self.db.get_account(email)
         if not account or not account.get('email_password'):
             raise Exception(f"No email password found for {email}")
@@ -35,23 +35,31 @@ class TacoBellBot:
     async def start(self): # Start new page and wait
         self.page = await self.context.new_page()
 
-        # Inject stealth scripts to bypass navigator checks
         await self.page.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         """)
 
         await self.page.set_viewport_size({"width": 1280, "height": 720})
 
-    async def get_email(self) -> str: # Get temporary email
+    async def get_email(self, first_name="Taco", last_name="Lover") -> str:
         self.email_address = self.email_service.get_email()
-        return self.email_address
+        
+        self.db.save_account(
+            email=self.email_address,
+            email_password=self.email_service.session_id,
+            first_name=first_name,
+            last_name=last_name,
+            used=False
+        )
+        logger.info(f"Placeholder account for {self.email_address} saved to database.")
+        
+        return self.email_address or ""
 
-    async def navigate_to_signup(self): # Navigate to signup page
+    async def navigate_to_signup(self):
         if not self.page:
             raise Exception("Page not initialized.")
         
         try:
-            # 1. Start with Google to look less like a bot
             logger.info("Miming human entry: visiting Google first...")
             try:
                 await self.page.goto("https://www.google.com", timeout=30000, wait_until="domcontentloaded")
@@ -59,31 +67,26 @@ class TacoBellBot:
             except Exception as e:
                 logger.warning(f"Initial Google visit failed (non-critical): {e}")
 
-            # 2. Go to Taco Bell homepage
             url_home = "https://www.tacobell.com/"
             logger.info(f"Navigating to homepage: {url_home}...")
             try:
                 await self.page.goto(url_home, timeout=45000, wait_until="domcontentloaded")
                 await self.page.wait_for_timeout(random.randint(2000, 4000))
-                # Human-like scroll
                 await self.page.mouse.wheel(0, random.randint(300, 700))
                 await self.page.wait_for_timeout(random.randint(1000, 2000))
                 await self.handle_cookie_banner()
             except Exception as e:
                 logger.warning(f"Homepage navigation failed/timed out: {e}")
 
-            # 3. Finally, go to the signup page
             url_signup = "https://www.tacobell.com/register/yum"
             logger.info(f"Navigating to signup directly: {url_signup}...")
             
-            # Using longer timeout and load instead of commit for better resilience
             response = await self.page.goto(url_signup, timeout=90000, referer="https://www.tacobell.com/", wait_until="load")
             
             if response and response.status == 403:
                 logger.error(f"Signup page blocked (403 Forbidden).")
                 
             try:
-                # Wait for the email input specifically
                 await self.page.wait_for_selector("input[aria-label='Email Address'], input[name='email']", timeout=30000)
                 logger.info("Successfully loaded signup page.")
             except Exception:
@@ -94,14 +97,13 @@ class TacoBellBot:
         except Exception as e:
             logger.error(f"Navigation failed: {e}")
             try:
-                # Ensure debug dir exists before screenshotting
                 os.makedirs(self.debug_dir, exist_ok=True)
                 # await self.page.screenshot(path=os.path.join(self.debug_dir, f"navigation_failure_{int(asyncio.get_event_loop().time())}.png"), timeout=10000)
             except:
                 pass
             raise
 
-    async def handle_cookie_banner(self): # Handle cookie banner
+    async def handle_cookie_banner(self):
         try:
             agree_button = self.page.locator("button:has-text('AGREE')").first
             if await agree_button.is_visible(timeout=5000):
@@ -111,7 +113,7 @@ class TacoBellBot:
         except Exception:
             pass
 
-    async def fill_registration_form(self, user_details: dict): # Fill registration form
+    async def fill_registration_form(self, user_details: dict):
         if not self.page:
             raise Exception("Page not initialized.")
 
@@ -225,7 +227,11 @@ class TacoBellBot:
         if not self.page:
             raise Exception("Page not initialized.")
             
-        logger.info(f"Entering verification code: {verification_code}")
+        email = user_details.get("email") or self.email_address
+        if not email:
+            raise Exception("Email address not found for completion.")
+
+        logger.info(f"Entering verification code for {email}: {verification_code}")
         
         try: # Enters verification code
             code_input = self.page.locator("input[aria-label='Enter Code']")
@@ -255,13 +261,11 @@ class TacoBellBot:
                     first_name = user_details.get("first_name", "Taco")
                     last_name = user_details.get("last_name", "Lover")
                     
-                    # first name
                     first_name_input = self.page.locator(name_input_selector).first
                     await first_name_input.click()
                     await first_name_input.fill(first_name)
                     logger.info("Filled First Name.")
                     
-                    # last name
                     last_name_selector = "input[name='lastName'], input[aria-label*='Last Name'], input[placeholder*='Last Name']"
                     last_name_input = self.page.locator(last_name_selector).first
                     if await last_name_input.is_visible(timeout=5000):
@@ -269,7 +273,6 @@ class TacoBellBot:
                         await last_name_input.fill(last_name)
                         logger.info("Filled Last Name.")
 
-                    # password
                     password_selector = "input[name='password'], input[type='password'], input[aria-label*='Password'], input[placeholder*='Password']"
                     password_input = self.page.locator(password_selector).first
                     if await password_input.is_visible(timeout=2000):
@@ -277,7 +280,6 @@ class TacoBellBot:
                         await password_input.fill(user_details.get("password", "TacoBell123!"))
                         logger.info("Filled Password.")
 
-                    # zip code
                     zip_selector = "input[name='zipCode'], input[name='zip'], input[aria-label*='Zip'], input[placeholder*='Zip']"
                     zip_input = self.page.locator(zip_selector).first
                     if await zip_input.is_visible(timeout=2000):
@@ -285,7 +287,6 @@ class TacoBellBot:
                         await zip_input.fill(user_details.get("zip_code", "90210"))
                         logger.info("Filled Zip.")
                     
-                    # terms & conditions checkbox
                     checkboxes = self.page.locator("input[type='checkbox']")
                     if await checkboxes.count() > 1:
                         terms_checkbox = checkboxes.nth(1)
@@ -299,7 +300,6 @@ class TacoBellBot:
                             logger.info("Checked value-menu checkbox (only one found).")
 
                     # submit
-                    # Try to find any submit button
                     submit_btn = self.page.locator("button", has_text=re.compile(r"create account|sign up|finish|confirm|let's|save|continue", re.IGNORECASE)).first
                     if not await submit_btn.is_visible():
                         submit_btn = self.page.locator("button[type='submit']").first
@@ -334,20 +334,18 @@ class TacoBellBot:
 
             # await self.page.screenshot(path=os.path.join(self.debug_dir, "registration_final.png"))
             
-            email = user_details.get("email") or self.email_address
-            
-            success = self.db.save_account(
+            # Update account with final details
+            success = self.db.update_account(
                 email=email,
-                email_password=self.email_service.session_id,
                 first_name=user_details.get("first_name", "Taco"),
                 last_name=user_details.get("last_name", "Lover"),
-                used=False
+                password=user_details.get("password", "TacoBell123!")
             )
             
             if success:
-                logger.info(f"Account {email} successfully saved to database.")
+                logger.info(f"Account {email} successfully updated in database.")
             else:
-                logger.warning(f"Account {email} could not be saved to database (maybe already exists).")
+                logger.warning(f"Account {email} could not be updated in database.")
 
             print(f"REGISTRATION COMPLETE: {email}")
 

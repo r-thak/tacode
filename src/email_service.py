@@ -1,12 +1,14 @@
 import logging
 import os
 import re
+import random
+
 import mailslurp_client
 from mailslurp_client.rest import ApiException
 
 logger = logging.getLogger(__name__)
     
-class EmailService: # Handle email using MailSlurp API
+class EmailService:
     def __init__(self):
         self.api_key = os.environ.get("MAILSLURP_API_KEY")
         if not self.api_key:
@@ -21,20 +23,52 @@ class EmailService: # Handle email using MailSlurp API
         self.email = None
         self.inbox_id = None
         self.session_id = None
+        self.blocked_domains_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "blocked_domains.txt")
 
-    def get_email(self): # Creates a new inbox on MailSlurp
+    def _get_blocked_domains(self):
+        if not os.path.exists(self.blocked_domains_file):
+            return []
         try:
-            inbox = self.inbox_controller.create_inbox(use_short_address=True)
-            self.email = inbox.email_address
-            self.inbox_id = inbox.id
-            self.session_id = f"{self.inbox_id}" # Store inbox ID for later
-            logger.info(f"Generated MailSlurp email: {self.email}")
-            return self.email
-        except ApiException as e:
-            logger.error(f"Failed to create MailSlurp inbox: {e}")
-            raise
+            with open(self.blocked_domains_file, 'r') as f:
+                return [line.strip().lower() for line in f if line.strip()]
+        except Exception as e:
+            logger.error(f"Error reading blocked domains: {e}")
+            return []
 
-    def login(self, email, session_id): # Restores session
+    def get_email(self):
+        blocked_domains = self._get_blocked_domains()
+        max_attempts = 5
+        
+        for attempt in range(max_attempts):
+            try:
+                taco_id = random.randint(1000, 9999)
+                inbox = self.inbox_controller.create_inbox(
+                    prefix=f"taco{taco_id}",
+                    use_domain_pool=True
+                )
+                
+                self.email = inbox.email_address
+                domain = self.email.split('@')[1]
+                
+                # Check if this domain is blocked
+                if domain.lower() in blocked_domains:
+                    logger.warning(f"Generated email domain {domain} is blocked. Retrying (Attempt {attempt + 1}/{max_attempts})...")
+                    continue
+
+                self.inbox_id = inbox.id
+                self.session_id = f"{self.inbox_id}" # Store inbox ID for later
+                
+                logger.info(f"Generated MailSlurp email: {self.email}")
+                return self.email
+                
+            except ApiException as e:
+                logger.error(f"Failed to create MailSlurp inbox: {e}")
+                if attempt == max_attempts - 1:
+                    raise
+        
+        raise Exception(f"Failed to generate a non-blocked email after {max_attempts} attempts.")
+
+    def login(self, email, session_id):
         self.email = email
         self.inbox_id = session_id 
         self.session_id = session_id
