@@ -84,7 +84,7 @@ class TacoBellBot:
                 
             try:
                 # Wait for the email input specifically
-                await self.page.wait_for_selector("input[name='email']", timeout=30000)
+                await self.page.wait_for_selector("input[aria-label='Email Address'], input[name='email']", timeout=30000)
                 logger.info("Successfully loaded signup page.")
             except Exception:
                 logger.warning("Email input not found, checking for blocking screens or errors...")
@@ -121,7 +121,7 @@ class TacoBellBot:
         logger.info(f"Inputting email for: {email}")
         
         try:
-            email_input = self.page.locator("input[name='email']")
+            email_input = self.page.locator("input[aria-label='Email Address'], input[name='email']").first
             await email_input.wait_for(state="visible", timeout=10000)
             
             import random
@@ -168,7 +168,7 @@ class TacoBellBot:
             self.page.on("response", handle_response)
             
             try:
-                success_selector = "text=Verify Your Email"
+                success_selector = "input[aria-label='Enter Code']"
                 await self.page.wait_for_selector(success_selector, timeout=30000)
                 logger.info("Successfully reached verification step.")
             except Exception:
@@ -264,9 +264,26 @@ class TacoBellBot:
                     # last name
                     last_name_selector = "input[name='lastName'], input[aria-label*='Last Name'], input[placeholder*='Last Name']"
                     last_name_input = self.page.locator(last_name_selector).first
-                    await last_name_input.click()
-                    await last_name_input.fill(last_name)
-                    logger.info("Filled Last Name.")
+                    if await last_name_input.is_visible(timeout=5000):
+                        await last_name_input.click()
+                        await last_name_input.fill(last_name)
+                        logger.info("Filled Last Name.")
+
+                    # password
+                    password_selector = "input[name='password'], input[type='password'], input[aria-label*='Password'], input[placeholder*='Password']"
+                    password_input = self.page.locator(password_selector).first
+                    if await password_input.is_visible(timeout=2000):
+                        await password_input.click()
+                        await password_input.fill(user_details.get("password", "TacoBell123!"))
+                        logger.info("Filled Password.")
+
+                    # zip code
+                    zip_selector = "input[name='zipCode'], input[name='zip'], input[aria-label*='Zip'], input[placeholder*='Zip']"
+                    zip_input = self.page.locator(zip_selector).first
+                    if await zip_input.is_visible(timeout=2000):
+                        await zip_input.click()
+                        await zip_input.fill(user_details.get("zip_code", "90210"))
+                        logger.info("Filled Zip.")
                     
                     # terms & conditions checkbox
                     checkboxes = self.page.locator("input[type='checkbox']")
@@ -283,7 +300,7 @@ class TacoBellBot:
 
                     # submit
                     # Try to find any submit button
-                    submit_btn = self.page.locator("button[type='submit']", has_text=re.compile(r"create|sign|finish|confirm|let's|save|continue", re.IGNORECASE)).first
+                    submit_btn = self.page.locator("button", has_text=re.compile(r"create account|sign up|finish|confirm|let's|save|continue", re.IGNORECASE)).first
                     if not await submit_btn.is_visible():
                         submit_btn = self.page.locator("button[type='submit']").first
 
