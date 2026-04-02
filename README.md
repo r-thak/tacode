@@ -1,3 +1,6 @@
+# Archived!
+This repo no longer works as Taco Bell has implemented a much more aggressive policy that automatically adds domains to a blocklist for sending mail and rate limits IPs more, both of which makes debugging much harder. Using something like https://smailpro.com/ and manually creating accounts is probably the only solid alternative at the moment, but I might revisit this project in the future when I have more resources for proxies and domains.
+
 # Taco Bell Registration Bot
 An automated account registration and management tool for Taco Bell.
 
