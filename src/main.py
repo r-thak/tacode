@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 async def run():
     emu = None
+    bot = None
     db_path = "accounts.sqlite"
     try:
         emu = await acquire_emulator()
@@ -54,6 +55,7 @@ async def run():
                 logger.error(f"Attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
                     logger.info("Retrying with a new emulator instance...")
+                    await bot.close()
                     await release_emulator(emu)
                     emu = None  # released -- don't let the outer finally double-release
                     await asyncio.sleep(5)
@@ -63,6 +65,8 @@ async def run():
                 else:
                     logger.error("All registration attempts failed.")
     finally:
+        if bot:
+            await bot.close()
         if emu:
             await release_emulator(emu)
         logger.info("Bot session finished.")

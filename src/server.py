@@ -68,6 +68,7 @@ import json
 
 async def run_bot_signup_stream(user_details: UserDetails):
     emu = None
+    bot = None
     try:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         db_path = os.path.join(current_dir, "..", "accounts.sqlite")
@@ -105,6 +106,11 @@ async def run_bot_signup_stream(user_details: UserDetails):
         yield json.dumps({"status": "error", "detail": str(e)}) + "\n"
 
     finally:
+        if bot:
+            try:
+                await bot.close()
+            except Exception:
+                pass
         if emu:
             try:
                 await release_emulator(emu)
@@ -119,8 +125,10 @@ async def dispense_account(request: Request, user_details: UserDetails):
 @app.post("/get_code")
 @limiter.limit("5/15 minute")
 async def get_login_code(request: Request, body: GetCodeRequest):
-    # No emulator/browser needed here: get_code_for_existing_account only
-    # talks to the mailbox (email_service.py), so we skip the device entirely.
+    # No emulator needed here: get_code_for_existing_account only talks to
+    # the mailbox (email_service.py), so we skip the Taco Bell app entirely.
+    # (The guerrillamail provider does open its own browser for this, but
+    # that's unrelated to the emulator/app.)
     current_dir = os.path.dirname(os.path.abspath(__file__))
     db_path = os.path.join(current_dir, "..", "accounts.sqlite")
     bot = TacoBellBot(None, db_path=db_path)
@@ -132,6 +140,8 @@ async def get_login_code(request: Request, body: GetCodeRequest):
     except Exception as e:
         logger.error(f"Error getting code: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await bot.close()
 current_dir = os.path.dirname(os.path.abspath(__file__))
 static_dir = os.path.join(current_dir, "..", "static")
 

@@ -144,7 +144,9 @@ class TacoBellBot:
         if not account or not account.get('email_password'):
             raise Exception(f"No email password found for {email}")
 
-        if self.email_service.login(email, account['email_password']):
+        loop = asyncio.get_event_loop()
+        logged_in = await loop.run_in_executor(None, self.email_service.login, email, account['email_password'])
+        if logged_in:
             code = await self.wait_for_verification_code()
             self.db.mark_account_used(email)
             return code
@@ -152,7 +154,11 @@ class TacoBellBot:
             raise Exception(f"Failed to login to email account for {email}")
 
     async def get_email(self, first_name="Taco", last_name="Lover") -> str:
-        self.email_address = self.email_service.get_email()
+        # get_email() may launch a real browser (guerrillamail provider), so
+        # don't block the event loop -- run it in a worker thread same as
+        # wait_for_verification_code below.
+        loop = asyncio.get_event_loop()
+        self.email_address = await loop.run_in_executor(None, self.email_service.get_email)
 
         self.db.save_account(
             email=self.email_address,
@@ -169,6 +175,13 @@ class TacoBellBot:
         loop = asyncio.get_event_loop()
         code = await loop.run_in_executor(None, self.email_service.wait_for_verification_code)
         return code
+
+    async def close(self):
+        """Release the emulator-independent resources this bot owns (currently
+        just the email service, which may hold an open browser). Call this in
+        callers' finally blocks alongside emulator_manager.release_emulator."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.email_service.close)
 
     # -- app automation ---------------------------------------------------
 

@@ -111,6 +111,19 @@ async def acquire_emulator() -> Emulator:
             await _wait_for_boot(serial)
             logger.info(f"{serial} booted.")
 
+            apk_ready = TACOBELL_APK_PATH and os.path.exists(TACOBELL_APK_PATH)
+            if not apk_ready:
+                rc, out, _ = await _run(ADB_BIN, "-s", serial, "shell", "pm", "path", TACOBELL_APP_PACKAGE)
+                already_installed = rc == 0 and out.strip().startswith("package:")
+                if not already_installed:
+                    raise RuntimeError(
+                        f"Neither TACOBELL_APK_PATH is set to a real file, nor is "
+                        f"{TACOBELL_APP_PACKAGE} already installed on this AVD (it's "
+                        f"freshly wiped each run, so a prior manual install doesn't "
+                        f"survive). Set TACOBELL_APK_PATH in .env -- see README.md "
+                        f"for how to pull the APK off a real device."
+                    )
+
             options = UiAutomator2Options()
             options.platform_name = "Android"
             options.udid = serial

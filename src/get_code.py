@@ -16,7 +16,8 @@ async def main():
 
     email = sys.argv[1]
 
-    # No emulator/browser needed: this only talks to the mailbox.
+    # No emulator needed: this only talks to the mailbox (may still open its
+    # own browser under the hood if EMAIL_PROVIDER=guerrillamail).
     bot = TacoBellBot(None)
 
     try:
@@ -25,6 +26,8 @@ async def main():
         print(f"\nSUCCESS! Verification code for {email}: {code}\n")
     except Exception as e:
         logger.error(f"Error: {e}")
+    finally:
+        await bot.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

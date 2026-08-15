@@ -3,6 +3,7 @@ selenium
 pytest
 requests
 mailslurp-client
+playwright
 python-dotenv
 fastapi
 uvicorn
