@@ -18,6 +18,11 @@ pip-delete-this-directory.txt
 /playwright/.local-browsers/
 .docker/
 .vscode/
+
+# APK bundles/splits if extracted inside the repo (README suggests tacobell_apk/) -- large binaries, keep out of git
+*.apk
+*.apkm
+tacobell_apk/
 .idea/
 *.swp
 *.swo
