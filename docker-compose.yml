@@ -1,3 +1,10 @@
+# Not usable as-is on this branch: emulator_manager.py execs the `emulator`
+# and `adb` binaries directly (to boot/wipe/kill a fresh device per
+# registration), which requires the Android SDK + hardware acceleration on
+# the same host as the process -- that doesn't work from inside a container
+# on macOS. Run `python src/server.py` directly on the host instead, next to
+# the emulator (see scripts/setup_emulator.sh). Left here only as a stub in
+# case someone wires up a Linux host with KVM passthrough later.
 services:
   bot:
     build: .

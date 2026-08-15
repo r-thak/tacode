@@ -13,11 +13,11 @@ from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from playwright.async_api import async_playwright
 
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from bot import TacoBellBot
+from emulator_manager import acquire_emulator, release_emulator
 
 # Logging
 logging.basicConfig(
@@ -67,69 +67,48 @@ from fastapi.responses import StreamingResponse
 import json
 
 async def run_bot_signup_stream(user_details: UserDetails):
-    browser = None
+    emu = None
     try:
-        async with async_playwright() as p:
-            # Enhanced anti-detection launch using Firefox
-            browser = await p.firefox.launch(
-                headless=True,
-                firefox_user_prefs={
-                    "dom.webdriver.enabled": False,
-                    "useAutomationExtension": False,
-                    "media.peerconnection.enabled": False,
-                }
-            )
-            
-            context = await browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-                locale='en-US',
-                timezone_id='America/New_York',
-                permissions=['geolocation'],
-                geolocation={'latitude': 40.7128, 'longitude': -74.0060},
-                ignore_https_errors=True
-            )
-            
-            await context.route("**/*{fullstory,google-analytics,doubleclick,hotjar,segment}*", lambda route: route.abort())
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(current_dir, "..", "accounts.sqlite")
-            
-            bot = TacoBellBot(context, db_path=db_path)
-            await bot.start()
-            
-            await bot.page.set_viewport_size({"width": 1920, "height": 1080})
-            
-            logger.info("Starting registration via API...")
-            email = await bot.get_email()
-            
-            yield json.dumps({"status": "email_generated", "email": email}) + "\n"
-            
-            await bot.navigate_to_signup()
-            await bot.fill_registration_form({
-                "email": email
-            })
-            
-            logger.info("Checking inbox for verification email...")
-            code = await bot.wait_for_verification_code()
-            logger.info(f"VERIFICATION CODE: {code}")
-            
-            await bot.complete_signup({
-                "first_name": user_details.first_name,
-                "last_name": user_details.last_name,
-            }, code)
-            
-            logger.info("Yielding success...")
-            yield json.dumps({"status": "success", "email": email, "code": code, "message": "Account created successfully"}) + "\n"
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        db_path = os.path.join(current_dir, "..", "accounts.sqlite")
+
+        logger.info("Booting a fresh emulator instance for this registration...")
+        emu = await acquire_emulator()
+
+        bot = TacoBellBot(emu.driver, db_path=db_path)
+        await bot.start()
+
+        logger.info("Starting registration via API...")
+        email = await bot.get_email()
+
+        yield json.dumps({"status": "email_generated", "email": email}) + "\n"
+
+        await bot.navigate_to_signup()
+        await bot.fill_registration_form({
+            "email": email
+        })
+
+        logger.info("Checking inbox for verification email...")
+        code = await bot.wait_for_verification_code()
+        logger.info(f"VERIFICATION CODE: {code}")
+
+        await bot.complete_signup({
+            "first_name": user_details.first_name,
+            "last_name": user_details.last_name,
+        }, code)
+
+        logger.info("Yielding success...")
+        yield json.dumps({"status": "success", "email": email, "code": code, "message": "Account created successfully"}) + "\n"
 
     except Exception as e:
         logger.error(f"Bot execution failed: {e}")
         yield json.dumps({"status": "error", "detail": str(e)}) + "\n"
-    
+
     finally:
-        if browser:
+        if emu:
             try:
-                await browser.close()
-            except:
+                await release_emulator(emu)
+            except Exception:
                 pass
 
 @app.post("/dispense")
@@ -140,32 +119,19 @@ async def dispense_account(request: Request, user_details: UserDetails):
 @app.post("/get_code")
 @limiter.limit("5/15 minute")
 async def get_login_code(request: Request, body: GetCodeRequest):
-    async with async_playwright() as p:
-        browser = await p.firefox.launch(
-            headless=True,
-            firefox_user_prefs={
-                "dom.webdriver.enabled": False,
-                "useAutomationExtension": False,
-                "media.peerconnection.enabled": False,
-            }
-        )
-        try:
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
-            )
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(current_dir, "..", "accounts.sqlite")
-            bot = TacoBellBot(context, db_path=db_path)
-            
-            logger.info(f"Retrieving code for {body.email}...")
-            code = await bot.get_code_for_existing_account(body.email)
-            return {"status": "success", "code": code}
-            
-        except Exception as e:
-            logger.error(f"Error getting code: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-        finally:
-            await browser.close()
+    # No emulator/browser needed here: get_code_for_existing_account only
+    # talks to the mailbox (email_service.py), so we skip the device entirely.
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(current_dir, "..", "accounts.sqlite")
+    bot = TacoBellBot(None, db_path=db_path)
+
+    try:
+        logger.info(f"Retrieving code for {body.email}...")
+        code = await bot.get_code_for_existing_account(body.email)
+        return {"status": "success", "code": code}
+    except Exception as e:
+        logger.error(f"Error getting code: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 current_dir = os.path.dirname(os.path.abspath(__file__))
 static_dir = os.path.join(current_dir, "..", "static")
 

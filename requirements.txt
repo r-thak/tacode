@@ -1,6 +1,6 @@
-playwright
+Appium-Python-Client
+selenium
 pytest
-playwright-stealth
 requests
 mailslurp-client
 python-dotenv

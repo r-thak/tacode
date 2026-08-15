@@ -2,7 +2,6 @@ import asyncio
 import sys
 import logging
 from bot import TacoBellBot
-from playwright.async_api import async_playwright
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,21 +15,16 @@ async def main():
         return
 
     email = sys.argv[1]
-    
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context()
-        
-        bot = TacoBellBot(context)
-        
-        try:
-            logger.info(f"Attempting to retrieve code for {email}...")
-            code = await bot.get_code_for_existing_account(email)
-            print(f"\nSUCCESS! Verification code for {email}: {code}\n")
-        except Exception as e:
-            logger.error(f"Error: {e}")
-        finally:
-            await browser.close()
+
+    # No emulator/browser needed: this only talks to the mailbox.
+    bot = TacoBellBot(None)
+
+    try:
+        logger.info(f"Attempting to retrieve code for {email}...")
+        code = await bot.get_code_for_existing_account(email)
+        print(f"\nSUCCESS! Verification code for {email}: {code}\n")
+    except Exception as e:
+        logger.error(f"Error: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
