@@ -1,15 +1,47 @@
 # Taco Bell Registration Bot
 An automated account registration and management tool for Taco Bell.
 
-> The `main` branch (Playwright/browser-based) is archived at
-> [`archive/playwright-web`](../../tree/archive/playwright-web) -- it stopped
-> working once Taco Bell started blocklisting the mail domains this project
-> uses and rate-limiting IPs more aggressively. This branch swaps the
-> transport from a browser hitting tacobell.com to a real Taco Bell Android
-> app running in a freshly-wiped emulator per registration, which sidesteps
-> the *web* bot-detection (the 403s off `arrange-credentials`) but **not**
-> the mail-domain blocklist -- that's transport-agnostic and will likely
-> still bite. `email_service.py` may need attention too.
+> **This branch's premise didn't survive contact with the real app.** The
+> idea was: the `main` branch (Playwright/browser-based, archived at
+> [`archive/playwright-web`](../../tree/archive/playwright-web)) died to Taco
+> Bell's web bot-detection and mail-domain blocklist, so drive the real
+> Android app in an emulator instead. I got the real app running against a
+> real APK end to end (see below) and submitted an actual sign-up. Result:
+> the app ships **more** anti-bot instrumentation than the website, not
+> less. At the moment the sign-up request goes out, the app's `BMP:*`
+> components (Akamai Bot Manager's behavioral-biometrics SDK) collect
+> motion/gyroscope/touch/keystroke-timing sensor data and ship it alongside
+> the request:
+> ```
+> BMP:CYFManager: Building sensor data: Thread[OkHttp https://www.tacobell.com/...]
+> BMP:MotionManager: Motion Event Count: 128/128
+> BMP:TouchManager: Touch Event Count: 18 (move: 0, updown: 18)
+> BMP:TextChangeManager: mEvent Count: 9, Key String ...  (per-keystroke timing)
+> ```
+> ...followed immediately by a generic "Uh-oh! We're experiencing a system
+> error" dialog. That's strong circumstantial evidence of a
+> behavioral-biometrics soft-block (not a decrypted server verdict, but the
+> timing is the textbook pattern) -- a headless AVD doesn't have real motion
+> sensors or human touch/typing cadence to feed it. See `src/bot.py`'s module
+> docstring for the full detail, including a second, later finding: the
+> sign-up button itself wouldn't reliably enable under Appium-synthesized
+> input across repeated live runs, though a raw `adb shell input tap` did it
+> once -- plausibly the same defense one layer earlier.
+>
+> I'm not attempting to spoof sensor data or otherwise defeat this -- that's
+> evasion tooling against a commercial anti-fraud vendor's product, not
+> something this repo does. Getting further would need a physical device
+> with real sensors and real human input, which is a different project.
+> Also unresolved regardless: the original mail-domain blocklist problem is
+> transport-agnostic and would likely still apply even if the above weren't
+> blocking things.
+>
+> What's real and worth keeping despite the negative result: a fresh AVD
+> boots, the real split-APK install works, a genuine Joda-Time crash on
+> first boot is fixed, and the onboarding + sign-up-modal selectors in
+> `src/bot.py` are calibrated against the real app (v8.90.2), not guessed.
+> Someone would otherwise have to redo all of that just to rediscover the
+> same wall.
 
 ## How?
 - A fresh Android emulator (wiped data, so a new device identity) is booted
@@ -29,43 +61,51 @@ macOS. Run everything directly on the host the emulator boots on.
    ```bash
    bash scripts/setup_emulator.sh
    ```
-2. **Get the Taco Bell APK onto disk** and point `TACOBELL_APK_PATH` at it in
-   `.env` (see `.env.example`). This is a manual step -- I tried to automate
-   it and couldn't:
+2. **Get the Taco Bell APK.** I couldn't automate this myself (see below) --
+   it needs a human:
    - Four APK mirrors (apkmirror, apkpure, apkpure.net, apkmonk) all return
-     `403` to scripted requests -- they're behind Cloudflare bot detection.
-     Defeating that would mean building a stealth-browser CAPTCHA-evasion
-     tool aimed at someone else's anti-bot system, which I won't do (it's
-     also the same fight the archived Playwright branch already lost, just
-     against a different WAF).
-   - Installing via the Play Store in an emulator needs a Google account
-     signed in interactively -- I don't have credentials and won't create
-     any, since automated Google sign-ins get flagged fast.
-   - What actually works: extract it from a real phone you own, with the
-     Taco Bell app already installed:
+     `403` to scripted requests -- Cloudflare bot detection. Defeating that
+     would mean building a stealth-browser CAPTCHA-evasion tool aimed at
+     someone else's anti-bot system, which I won't do.
+   - The Play Store route needs a Google account signed in interactively --
+     I don't have credentials and won't create any.
+   - What works: download the `.apkm` bundle manually through a normal
+     browser from an APK mirror (solving whatever human-facing checks it
+     shows), or extract split APKs off a real device with the app installed
+     (`adb shell pm path com.tacobell.ordering` then `adb pull`).
+   - An `.apkm` is just a zip of split APKs. Extract the ones matching your
+     AVD (Apple Silicon Macs: `arm64_v8a`) into one directory:
      ```bash
-     adb shell pm path com.tacobell.ordering
-     adb pull <path from above> tacobell.apk
+     unzip -j com.tacobell.ordering*.apkm \
+       base.apk split_config.arm64_v8a.apk split_config.xxhdpi.apk split_config.en.apk \
+       -d tacobell_apk/
      ```
-     or download it manually through a normal browser from an APK mirror
-     site (solving whatever human-facing checks it shows) and place it
-     wherever `TACOBELL_APK_PATH` points.
-3. Verify the element locators in `src/bot.py`'s `SELECTORS` dict against the
-   real app. They're unverified placeholders based on typical naming
-   conventions -- boot the AVD, launch the app, and use Appium Inspector
-   (`appium inspector`) or `adb shell uiautomator dump` to get the real
-   resource-ids/accessibility-ids, since I don't have the APK to calibrate
-   them here.
-4. In one terminal:
+     Point `TACOBELL_APK_DIR` in `.env` at that directory --
+     `emulator_manager.py` installs it via `adb install-multiple` on every
+     boot (Appium's `app` capability can't install split APKs, and the AVD
+     is wiped every run so nothing persists between calls anyway).
+3. In one terminal:
    ```bash
    appium
    ```
-5. In another:
+4. In another:
    ```bash
    pip install -r requirements.txt
    playwright install chromium   # only needed for EMAIL_PROVIDER=guerrillamail
    python src/server.py
    ```
+
+Note: a freshly-wiped AVD boots with `persist.sys.timezone=America/Chicago`,
+which crashes this app at startup via a Joda-Time "zone id not recognised"
+error -- `emulator_manager.py` works around this automatically
+(`service call alarm 3 s16 UTC` right after boot; `setprop` alone doesn't
+stick, the property is read-only on this image). You shouldn't need to touch
+this, but if the app is crash-looping, that's the first thing to check.
+
+### Docker
+`docker compose up -d --build` still builds an image, but it only runs the
+FastAPI process -- there's no emulator inside it. Not the recommended path
+on this branch; see the comment in `docker-compose.yml`.
 
 ## Email provider
 `EMAIL_PROVIDER` in `.env` picks between:
@@ -79,8 +119,8 @@ macOS. Run everything directly on the host the emulator boots on.
   a Cloudflare Turnstile CAPTCHA I'm not going to write a solver for.
   guerrillamail.com had no CAPTCHA on the plain generate-address/read-inbox
   path, so I built and **live-tested** the whole flow against it (address
-  generation, inbox parsing, opening a message, and session resume all
-  verified working end to end while writing this).
+  generation, blocklist-domain rotation, inbox parsing, opening a message,
+  and session resume all verified working end to end while writing this).
 
   Caveats, read before flipping this on for real registrations:
   - guerrillamail's own domains (`sharklasers.com`, `guerrillamail.*`,
@@ -91,11 +131,6 @@ macOS. Run everything directly on the host the emulator boots on.
     transport swap, not a fix for that problem.
   - Addresses and their mail expire after ~1 hour, so `/get_code` only works
     within that window of the original `/dispense` call.
-
-### Docker
-`docker compose up -d --build` still builds an image, but it only runs the
-FastAPI process -- there's no emulator inside it. Not the recommended path
-on this branch; see the comment in `docker-compose.yml`.
 
 ## API Endpoints
 The server runs on port `8000` by default, but the default port forwarded by docker is `15552`. Endpoint rate limit of 5reqs/15min. Modify CORS if you want to serve this on a different port or domain.

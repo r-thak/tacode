@@ -29,12 +29,14 @@ ADB_BIN = os.path.join(ANDROID_HOME, "platform-tools", "adb")
 
 AVD_NAME = os.environ.get("TACOBELL_AVD_NAME", "tacobell_base")
 APPIUM_SERVER_URL = os.environ.get("APPIUM_SERVER_URL", "http://127.0.0.1:4723")
-TACOBELL_APK_PATH = os.environ.get("TACOBELL_APK_PATH")  # only needed the first time the AVD doesn't have the app
+# Directory containing the split APKs to install (base.apk + one arch split +
+# one density split + one language split -- see README.md "Get the APK").
+# Appium's `app` capability can't install split APKs, so these get installed
+# directly via `adb install-multiple` before the Appium session attaches.
+TACOBELL_APK_DIR = os.environ.get("TACOBELL_APK_DIR")
 TACOBELL_APP_PACKAGE = os.environ.get("TACOBELL_APP_PACKAGE", "com.tacobell.ordering")
-# Leave unset by default: when `app` (the APK path) is provided, Appium can
-# auto-detect the launchable activity from the package manifest, which is
-# more reliable than guessing the activity class name here.
-TACOBELL_APP_ACTIVITY = os.environ.get("TACOBELL_APP_ACTIVITY") or None
+# Verified against a real APK (version 8.90.2) booted on this AVD -- not a guess.
+TACOBELL_APP_ACTIVITY = os.environ.get("TACOBELL_APP_ACTIVITY", "com.tacobell.splash.SplashActivity")
 
 BOOT_TIMEOUT_S = 120
 # Only one emulator instance runs at a time (one AVD, reused + wiped between
@@ -77,6 +79,37 @@ async def _wait_for_boot(serial: str, timeout: int = BOOT_TIMEOUT_S):
     raise TimeoutError(f"Emulator {serial} did not finish booting within {timeout}s")
 
 
+async def _install_app(serial: str):
+    """Install the split APKs via `adb install-multiple` (Appium's `app`
+    capability can only take a single APK, not a split set). The AVD is
+    wiped every boot, so this runs on every acquire_emulator() call --
+    there's no persistent install to fall back on."""
+    if not TACOBELL_APK_DIR or not os.path.isdir(TACOBELL_APK_DIR):
+        rc, out, _ = await _run(ADB_BIN, "-s", serial, "shell", "pm", "path", TACOBELL_APP_PACKAGE)
+        if rc == 0 and out.strip().startswith("package:"):
+            return  # somehow already installed (e.g. baked into the AVD image) -- fine
+        raise RuntimeError(
+            f"TACOBELL_APK_DIR is not set to a real directory, and "
+            f"{TACOBELL_APP_PACKAGE} isn't installed on this AVD (it's "
+            f"freshly wiped every run, so nothing persists between calls). "
+            f"Set TACOBELL_APK_DIR in .env to a folder containing base.apk + "
+            f"the matching split APKs -- see README.md."
+        )
+
+    apks = sorted(
+        os.path.join(TACOBELL_APK_DIR, f)
+        for f in os.listdir(TACOBELL_APK_DIR)
+        if f.endswith(".apk")
+    )
+    if not apks:
+        raise RuntimeError(f"No .apk files found in TACOBELL_APK_DIR ({TACOBELL_APK_DIR}).")
+
+    rc, out, err = await _run(ADB_BIN, "-s", serial, "install-multiple", "-r", *apks)
+    if rc != 0 or "Success" not in out:
+        raise RuntimeError(f"adb install-multiple failed: {out}\n{err}")
+    logger.info(f"Installed {len(apks)} split APK(s) from {TACOBELL_APK_DIR} on {serial}.")
+
+
 async def acquire_emulator() -> Emulator:
     """Boot a freshly-wiped emulator and return it with a live Appium session attached."""
     await _emulator_lock.acquire()
@@ -111,33 +144,30 @@ async def acquire_emulator() -> Emulator:
             await _wait_for_boot(serial)
             logger.info(f"{serial} booted.")
 
-            apk_ready = TACOBELL_APK_PATH and os.path.exists(TACOBELL_APK_PATH)
-            if not apk_ready:
-                rc, out, _ = await _run(ADB_BIN, "-s", serial, "shell", "pm", "path", TACOBELL_APP_PACKAGE)
-                already_installed = rc == 0 and out.strip().startswith("package:")
-                if not already_installed:
-                    raise RuntimeError(
-                        f"Neither TACOBELL_APK_PATH is set to a real file, nor is "
-                        f"{TACOBELL_APP_PACKAGE} already installed on this AVD (it's "
-                        f"freshly wiped each run, so a prior manual install doesn't "
-                        f"survive). Set TACOBELL_APK_PATH in .env -- see README.md "
-                        f"for how to pull the APK off a real device."
-                    )
+            # MANDATORY, not a nicety: a freshly-wiped AVD comes up with
+            # persist.sys.timezone=America/Chicago, and the app crashes at
+            # TacobellApplication.onCreate() via a Joda-Time
+            # "datetime zone id 'America/Chicago' is not recognised" error on
+            # this system image -- the app never gets past a WebView crash
+            # loop without this. `setprop persist.sys.timezone` fails (the
+            # property is read-only on this image); the alarm service call is
+            # what actually sticks.
+            await _run(ADB_BIN, "-s", serial, "shell", "service", "call", "alarm", "3", "s16", "UTC")
+
+            await _install_app(serial)
 
             options = UiAutomator2Options()
             options.platform_name = "Android"
             options.udid = serial
             options.app_package = TACOBELL_APP_PACKAGE
-            if TACOBELL_APP_ACTIVITY:
-                options.app_activity = TACOBELL_APP_ACTIVITY
-            options.no_reset = False
-            options.full_reset = False
+            options.app_activity = TACOBELL_APP_ACTIVITY
+            # App is already installed via adb install-multiple above --
+            # Appium can't install split APKs itself, so no `app` capability
+            # here. no_reset=True means "don't wipe app data before
+            # attaching" (the whole AVD was already wiped at boot).
+            options.no_reset = True
             options.auto_grant_permissions = True
             options.new_command_timeout = 120
-            if TACOBELL_APK_PATH and os.path.exists(TACOBELL_APK_PATH):
-                # Installs (or reinstalls) the APK before launching. Skip this
-                # if the AVD's snapshot/image already has the app baked in.
-                options.app = TACOBELL_APK_PATH
 
             loop = asyncio.get_event_loop()
             emu.driver = await loop.run_in_executor(
