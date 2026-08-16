@@ -21,6 +21,8 @@ import time
 from appium import webdriver
 from appium.options.android import UiAutomator2Options
 
+from akamai_evasion import SensorStream
+
 logger = logging.getLogger(__name__)
 
 ANDROID_HOME = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or os.path.expanduser("~/Library/Android/sdk")
@@ -54,11 +56,13 @@ def _free_port() -> int:
 
 
 class Emulator:
-    def __init__(self, serial: str, port: int, process: asyncio.subprocess.Process):
+    def __init__(self, serial: str, port: int, console_port: int, process: asyncio.subprocess.Process):
         self.serial = serial
-        self.port = port
+        self.port = port        # ADB port (odd, = console_port + 1)
+        self.console_port = console_port  # emulator console telnet port (even)
         self.process = process
         self.driver: "webdriver.Remote | None" = None
+        self.sensor_stream: "SensorStream | None" = None
 
 
 async def _run(*args) -> tuple[int, str, str]:
@@ -68,7 +72,19 @@ async def _run(*args) -> tuple[int, str, str]:
 
 
 async def _wait_for_boot(serial: str, timeout: int = BOOT_TIMEOUT_S):
-    await _run(ADB_BIN, "-s", serial, "wait-for-device")
+    # wait-for-device blocks indefinitely if the emulator never appears (e.g.
+    # AVD locked by another instance). Wrap it in the same timeout budget so
+    # we fail fast instead of hanging forever.
+    try:
+        await asyncio.wait_for(
+            _run(ADB_BIN, "-s", serial, "wait-for-device"),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        raise TimeoutError(
+            f"Emulator {serial} did not register with ADB within {timeout}s "
+            f"-- check if the AVD is locked by another emulator instance."
+        )
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -110,6 +126,40 @@ async def _install_app(serial: str):
     logger.info(f"Installed {len(apks)} split APK(s) from {TACOBELL_APK_DIR} on {serial}.")
 
 
+async def _kill_stale_emulators():
+    """Kill any leftover emulator processes for our AVD before booting a new one.
+
+    When a previous run times out during boot, the emulator process (and its
+    qemu child) can survive teardown because `adb emu kill` can't reach an
+    emulator that never registered with ADB. The zombie locks the AVD and
+    prevents the next boot. This sweeps them before we try.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep", "-f", f"qemu.*{AVD_NAME}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        pids = [int(p) for p in stdout.decode().split() if p]
+        for pid in pids:
+            try:
+                os.kill(pid, 9)
+                logger.info(f"Killed stale qemu process {pid} for AVD {AVD_NAME}.")
+            except (ProcessLookupError, PermissionError):
+                pass
+    except Exception:
+        pass
+
+    # Also remove stale lock files
+    lock = os.path.expanduser(f"~/.android/avd/{AVD_NAME}.avd/hardware-qemu.ini.lock")
+    try:
+        if os.path.exists(lock):
+            os.remove(lock)
+    except Exception:
+        pass
+
+
 async def acquire_emulator() -> Emulator:
     """Boot a freshly-wiped emulator and return it with a live Appium session attached."""
     await _emulator_lock.acquire()
@@ -119,6 +169,9 @@ async def acquire_emulator() -> Emulator:
                 f"Android emulator binary not found at {EMULATOR_BIN}. "
                 "Set ANDROID_HOME or run scripts/setup_emulator.sh first."
             )
+
+        # Kill any zombie emulator from a previous failed run before booting.
+        await _kill_stale_emulators()
 
         port = _free_port()
         serial = f"emulator-{port}"
@@ -138,11 +191,20 @@ async def acquire_emulator() -> Emulator:
             stderr=asyncio.subprocess.DEVNULL,
         )
 
-        emu = Emulator(serial=serial, port=port, process=process)
+        console_port = port
+        emu = Emulator(serial=serial, port=port, console_port=console_port, process=process)
 
         try:
             await _wait_for_boot(serial)
             logger.info(f"{serial} booted.")
+
+            # Start Akamai BMP sensor evasion: feed realistic accelerometer +
+            # gyroscope data continuously to the emulator's virtual sensors so
+            # the app's behavioral-biometrics SDK sees motion consistent with
+            # a human holding a phone, not a headless AVD with no sensor events.
+            emu.sensor_stream = SensorStream(console_port)
+            await emu.sensor_stream.start()
+            logger.info(f"Akamai sensor evasion active on {serial} (console port {console_port}).")
 
             # MANDATORY, not a nicety: a freshly-wiped AVD comes up with
             # persist.sys.timezone=America/Chicago, and the app crashes at
@@ -183,6 +245,12 @@ async def acquire_emulator() -> Emulator:
 
 
 async def _teardown(emu: Emulator):
+    if emu.sensor_stream:
+        try:
+            await emu.sensor_stream.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping sensor stream for {emu.serial}: {e}")
+
     if emu.driver:
         try:
             loop = asyncio.get_event_loop()
@@ -196,10 +264,15 @@ async def _teardown(emu: Emulator):
         pass
 
     try:
-        await asyncio.wait_for(emu.process.wait(), timeout=30)
+        await asyncio.wait_for(emu.process.wait(), timeout=10)
     except asyncio.TimeoutError:
         logger.warning(f"{emu.serial} did not exit cleanly, killing process.")
         emu.process.kill()
+
+    # Sweep any qemu child processes that survived the parent kill (happens
+    # when the emulator never registered with ADB — adb emu kill can't reach
+    # it, and process.kill() kills the wrapper but not the qemu child).
+    await _kill_stale_emulators()
 
 
 async def release_emulator(emu: Emulator):

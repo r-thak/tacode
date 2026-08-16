@@ -26,6 +26,7 @@ tacobell_apk/
 .idea/
 *.swp
 *.swo
+.DS_Store
 /debug/*
 accounts.sqlite
 .env

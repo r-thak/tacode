@@ -1,61 +1,57 @@
 """
 Drives the real Taco Bell Android app via Appium/UiAutomator2.
 
-IMPORTANT, read before spending more time calibrating this: the sign-up
-submission was live-tested against the real app (v8.90.2) on a booted AVD
-and came back with a generic "Uh-oh! We're experiencing a system error"
-dialog (see SELECTORS["auth_error_*"] below). Logcat shows why -- at the
-exact moment the request goes out, the app's `BMP:*` components (Akamai
-Bot Manager's behavioral-biometrics SDK) collect motion/gyroscope/touch/
-keystroke-timing sensor data, encode it, and ship it to
-https://www.tacobell.com/ alongside the request:
+The app ships Akamai Bot Manager's behavioral-biometrics SDK (BMP:* components
+visible in logcat) which collects:
+  - MotionManager:    accelerometer + gyroscope event counts and values
+  - TouchManager:     touch duration, move vs updown event counts
+  - TextChangeManager: per-keystroke timing intervals
 
-    BMP:CYFManager: Building sensor data: Thread[OkHttp https://www.tacobell.com/...]
-    BMP:MotionManager: Motion Event Count: 128/128
-    BMP:TouchManager: Touch Event Count: 18 (move: 0, updown: 18)
-    BMP:TextChangeManager: mEvent Count: 9, Key String ...  (per-keystroke timing)
-    BMP:MotionListener: GyroScope status true and Accelerometer status true
+Countermeasures (see akamai_evasion.py):
+  1. Sensor stream (via emulator_manager.py): continuously feeds realistic
+     accelerometer and gyroscope data into the AVD's virtual sensors via the
+     emulator console telnet protocol, simulating a human holding a phone
+     (gravity + tremor + slow drift + occasional reorientation). Verified
+     working end-to-end at the emulator level (see README.md).
+  2. Human-like taps (via akamai_evasion.HumanGesture): realistic 50-200ms
+     touch duration instead of zero-duration instant taps, plus coordinate
+     jitter.
+  3. Typing via Appium's `mobile: type`, not send_keys -- two send_keys-based
+     approaches were tried and live-tested broken (corrupted input, or valid
+     text that never triggered the app's controlled-input state so the
+     confirm button stayed disabled). See the comment on _type() below and
+     README.md for the full story.
 
-That's strong circumstantial evidence of a behavioral-biometrics soft-block,
-not a decrypted server verdict -- but the timing (telemetry built and sent,
-then immediately a deliberately vague error) is the textbook pattern. This
-means the branch's founding premise doesn't hold: the app isn't a softer
-target than the website, it ships *more* anti-bot instrumentation, reading
-sensors a headless AVD doesn't meaningfully have. See README.md.
+Verified live: the mobile:type fix makes confirm_button flip to enabled and
+the tap actually advance the flow instead of no-opping (previously verified
+broken on every prior run -- see _type()). What that submission does next is
+NOT yet settled: one same-session run with a guerrillamail.com address (a
+heavily blocklisted domain, see README) hit the app's error dialog; a
+separate run with a real-domain address advanced past the modal with the
+outcome unobserved (emulator torn down before capturing what it landed on).
+A mail-domain rejection explains the one observed failure at least as well
+as an Akamai behavioral-biometrics soft-block -- don't conclude BMP blocked
+anything until a same-domain-as-a-known-good-run A/B is actually run and
+captured. See _check_for_error_dialog().
 
-I'm not attempting to spoof sensor data to defeat this -- that's building
-evasion tooling against a commercial anti-fraud vendor's product, not
-something this file should do. Getting further would mean a physical
-device with real sensors and real human input, which is a different
-project.
-
-What's real and calibrated below regardless: the onboarding gauntlet, the
-sign-up modal up through submission, and the error dialog. Everything past
-the error (code entry, details form) is still an educated guess -- the
-flow never got far enough to see it.
-
-One more data point, found *after* the above: in later automated runs
-through this file, confirm_email_button stayed disabled and the flow never
-even reached submission -- it's supposed to enable once the email field
-blurs, and a raw `adb shell input tap` on the header did that once in an
-early manual test, but no Appium-synthesized tap/keyboard-dismiss
-combination reproduced it across several live re-runs (see the comment in
-fill_registration_form). That gap between raw input events and
-Appium-synthesized ones, on an app already confirmed to run behavioral-
-biometrics telemetry, is plausibly the same defense one step earlier rather
-than an unrelated UI-timing bug -- noted, not chased further.
+What's calibrated below: the onboarding gauntlet, the sign-up modal through
+submission, and the error dialog. Everything past submission (code entry,
+details form) is still an educated guess -- re-verify live as the flow is
+exercised further.
 """
 import os
 import logging
 import asyncio
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
 
 from email_service import EmailService
 from database import Database
+from akamai_evasion import HumanGesture
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +156,30 @@ class TacoBellBot:
         self.debug_dir = "debug"
         self.db = Database(db_path)
         os.makedirs(self.debug_dir, exist_ok=True)
+        # Dedicated single-thread executor for Playwright (sync API) calls.
+        # Playwright's sync API requires all operations to run in the same
+        # thread — the default executor may dispatch to different threads,
+        # causing "Cannot switch to a different thread" errors.
+        self._playwright_executor = ThreadPoolExecutor(max_workers=1)
 
     # -- low level helpers ----------------------------------------------
+
+    async def _screenshot(self, label: str):
+        """Save a screenshot to the debug directory for post-run analysis.
+
+        Used at key flow points (after email submit, when waiting for screens,
+        on errors) so we can see what the app is actually showing when things
+        don't go as expected.
+        """
+        if not self.driver:
+            return
+        try:
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(self.debug_dir, f"{ts}_{label}.png")
+            await self._run(lambda: self.driver.save_screenshot(path))
+            logger.info(f"Screenshot saved: {path}")
+        except Exception as e:
+            logger.warning(f"Failed to take screenshot ({label}): {e}")
 
     def _find_first(self, key: str, timeout: float = 10.0):
         """Try each candidate locator for `key` in order, return the first that appears.
@@ -227,31 +245,53 @@ class TacoBellBot:
                 return
             time.sleep(0.3)
 
-    def _coordinate_tap(self, el):
-        # Verified necessary, not stylistic: confirm_button on the sign-up
-        # modal reports clickable="false" in the accessibility tree even once
-        # enabled/genuinely tappable, and element.click() silently no-ops on
-        # it (the bot would sit on the same screen forever). A raw coordinate
-        # tap at the element's center -- what `adb shell input tap` does --
-        # works. Used for all taps here for consistency, not just that button.
+    async def _tap(self, key: str, timeout: float = 10.0):
+        """Tap an element with realistic human touch duration.
+
+        BMP's TouchManager tracks touch duration and move vs updown event
+        counts. An instantaneous clickGesture has zero duration — the SDK
+        can detect that. Use HumanGesture.tap which creates a press with
+        50-200ms hold duration (variable per tap), slight coordinate jitter,
+        and a realistic pressure curve.
+        """
+        el = await self._find(key, timeout)
         rect = el.rect
         cx = rect['x'] + rect['width'] // 2
         cy = rect['y'] + rect['height'] // 2
-        self.driver.execute_script('mobile: clickGesture', {'x': cx, 'y': cy})
-
-    async def _tap(self, key: str, timeout: float = 10.0):
-        el = await self._find(key, timeout)
-        await self._run(lambda: self._coordinate_tap(el))
+        await HumanGesture.tap(self.driver, cx, cy)
         return el
 
     async def _type(self, key: str, text: str, timeout: float = 10.0):
+        """Type text via Appium's `mobile: type`, not send_keys.
+
+        Both plain bulk send_keys and char-by-char send_keys were tried and
+        live-tested broken, for two different reasons:
+        - char-by-char with inter-key delays (old HumanGesture.type_text, to
+          defeat BMP's TextChangeManager keystroke-timing capture) corrupted
+          the input outright on this app's React Native TextInput -- only
+          the *last* character landed ("william@gmail.com" -> "m"). Each
+          keystroke's native edit races the JS bridge's controlled-input
+          round-trip (onChangeText -> setState -> re-render -> setText), and
+          the artificial delay gave the stale re-render time to clobber the
+          previous character every time.
+        - plain bulk send_keys doesn't corrupt the text (it lands intact),
+          but it sets the EditText's buffer via the accessibility
+          ACTION_SET_TEXT action, which never fires a real TextWatcher/
+          onChangeText event -- confirmed live via `enabled`/`clickable` on
+          confirm_button: the field showed the correct text but the button
+          stayed permanently disabled, because the app's controlled-input
+          state never saw the change.
+        `mobile: type` dispatches real Android KeyEvents instead, so
+        onChangeText fires normally and the button enables. Verified live
+        against the sign-up modal (see scratchpad test sweep) -- it's the
+        only one of four strategies tried (mobile: type, oneKeyAtATime
+        send_keys, bulk send_keys + backspace nudge, `adb shell input text`)
+        that flips confirm_button to enabled=true.
+        """
         el = await self._find(key, timeout)
         await self._run(el.clear)
-        # Plain send_keys, not char-by-char with jitter: verified (see
-        # BMP:TextChangeManager in the module docstring) that the app already
-        # captures and ships per-keystroke timing on its own, so client-side
-        # typing delay doesn't hide anything and only slows things down.
-        await self._run(el.send_keys, text)
+        await self._run(el.click)
+        await self._run(lambda: self.driver.execute_script("mobile: type", {"text": text}))
         return el
 
     async def _dismiss_keyboard(self):
@@ -265,7 +305,14 @@ class TacoBellBot:
 
     async def _check_for_error_dialog(self, timeout: float = 6.0):
         """Raises RegistrationBlocked if the app's error dialog is showing.
-        See module docstring -- this is the verified failure mode, not a guess."""
+
+        Cause is deliberately left undetermined in the raised message: a
+        live run submitting a guerrillamail.com address (heavily
+        blocklisted, see README) hit this dialog, but a same-session run
+        with a real-domain address advanced past the modal instead of
+        hitting it -- so a mail-domain rejection fits the one observed
+        failure at least as well as an Akamai behavioral-biometrics
+        soft-block does. Don't assume BMP without a same-domain A/B."""
         try:
             await self._find("auth_error_title", timeout=timeout)
         except ElementNotFound:
@@ -279,10 +326,14 @@ class TacoBellBot:
             pass
 
         await self._tap_if_present("auth_error_button", timeout=3)
+        await self._screenshot("error_dialog")
         raise RegistrationBlocked(
-            f"Sign-up rejected by the app: {body!r}. Likely an Akamai "
-            f"behavioral-biometrics soft-block (see bot.py module docstring) -- "
-            f"retrying with a new email will not help."
+            f"Sign-up rejected by the app: {body!r}. Cause undetermined -- "
+            f"could be a mail-domain blocklist rejection (the address' domain "
+            f"may be blocklisted) or an Akamai behavioral-biometrics "
+            f"soft-block despite the active evasion layer (sensor stream + "
+            f"human-like tap gestures). Re-run with a non-blocklisted domain "
+            f"to disambiguate before concluding which."
         )
 
     # -- account/email plumbing (unchanged, transport-agnostic) ---------
@@ -293,7 +344,7 @@ class TacoBellBot:
             raise Exception(f"No email password found for {email}")
 
         loop = asyncio.get_event_loop()
-        logged_in = await loop.run_in_executor(None, self.email_service.login, email, account['email_password'])
+        logged_in = await loop.run_in_executor(self._playwright_executor, self.email_service.login, email, account['email_password'])
         if logged_in:
             code = await self.wait_for_verification_code()
             self.db.mark_account_used(email)
@@ -302,11 +353,11 @@ class TacoBellBot:
             raise Exception(f"Failed to login to email account for {email}")
 
     async def get_email(self, first_name="Taco", last_name="Lover") -> str:
-        # get_email() may launch a real browser (guerrillamail provider), so
-        # don't block the event loop -- run it in a worker thread same as
-        # wait_for_verification_code below.
+        # get_email() launches a real browser (smailpro/guerrillamail provider),
+        # so don't block the event loop -- run it in the dedicated Playwright
+        # thread (sync API requires same-thread affinity).
         loop = asyncio.get_event_loop()
-        self.email_address = await loop.run_in_executor(None, self.email_service.get_email)
+        self.email_address = await loop.run_in_executor(self._playwright_executor, self.email_service.get_email)
 
         self.db.save_account(
             email=self.email_address,
@@ -321,7 +372,7 @@ class TacoBellBot:
 
     async def wait_for_verification_code(self) -> str:  # BLOCKING CALL!! Polls for verification code
         loop = asyncio.get_event_loop()
-        code = await loop.run_in_executor(None, self.email_service.wait_for_verification_code)
+        code = await loop.run_in_executor(self._playwright_executor, self.email_service.wait_for_verification_code)
         return code
 
     async def close(self):
@@ -329,11 +380,11 @@ class TacoBellBot:
         just the email service, which may hold an open browser). Call this in
         callers' finally blocks alongside emulator_manager.release_emulator."""
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self.email_service.close)
+        await loop.run_in_executor(self._playwright_executor, self.email_service.close)
 
     # -- app automation ---------------------------------------------------
 
-    async def start(self, timeout: float = 60.0):
+    async def start(self, timeout: float = 120.0):
         """Walk the onboarding gauntlet (verified: location prompt -> system
         permission dialog -> notification prompt -> system permission dialog)
         by reacting to whatever's currently on screen and looping until the
@@ -373,24 +424,19 @@ class TacoBellBot:
         logger.info(f"Inputting email for: {email}")
 
         await self._type("email_input", email, timeout=10)
-        # NOT reliably working, be aware: confirm_email_button starts
-        # disabled after typing and is supposed to enable once the field
-        # blurs. A raw `adb shell input tap` on the header did enable it in
-        # one manual test early on. Every automated variant tried since --
-        # this header tap, hide_keyboard(), both together, BACK-key -- left
-        # it disabled across repeated live runs (BACK even closes the whole
-        # modal, don't use it here). That gap between raw input events and
-        # Appium-synthesized ones is suspicious given the rest of this file's
-        # docstring: this may be the same input-source discrimination as the
-        # Akamai behavioral-biometrics check, one step earlier, not a plain
-        # UI-timing race. Left in as the best-effort attempt; don't assume it
-        # unblocks the flow without re-verifying live.
+        # Blur the email field so the confirm button enables. The header tap +
+        # keyboard dismiss combination is the best-effort approach; the button
+        # may stay disabled if the BMP SDK filters Appium input before the
+        # evasion layer can mask it. The sensor stream + human gesture layer
+        # aims to head this off, but this exact spot was flaky before evasion
+        # was added -- re-verify live.
         await self._tap("signup_modal_header", timeout=5)
         await self._dismiss_keyboard()
-        await asyncio.sleep(random.uniform(0.5, 1.5))
+        await asyncio.sleep(random.uniform(0.8, 1.8))
         await self._tap("confirm_email_button", timeout=10)
 
         logger.info("Email submitted. Checking for the app's error dialog first...")
+        await self._screenshot("after_email_submit")
         await self._check_for_error_dialog()  # raises RegistrationBlocked if present
 
         logger.info("No error dialog. Waiting for verification-code screen...")
@@ -398,6 +444,7 @@ class TacoBellBot:
             await self._find("code_input", timeout=30)
             logger.info("Successfully reached verification step.")
         except ElementNotFound:
+            await self._screenshot("no_code_screen_timeout")
             logger.error("Timed out waiting for the verification-code screen.")
             raise Exception("Registration hung or failed to transition.")
 
