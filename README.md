@@ -1,5 +1,7 @@
-# Archived!
-This repo no longer works as Taco Bell has implemented a much more aggressive policy that automatically adds domains to a blocklist for sending mail and rate limits IPs more, both of which makes debugging much harder. Using something like https://smailpro.com/ and manually creating accounts is probably the only solid alternative at the moment, but I might revisit this project in the future when I have more resources for proxies and domains.
+I've resumed working on this after I noticed that Taco Bell's new mobile app is so horribly made that even normal functions like trying to pay with Apple Pay (or just pay in general) don't work correctly. Since the newer versions of the app dropped some of the protections that made it much more difficult to automate account creation, I'm taking a shot at reworking the repo to use an adb based approach instead of browser automation :p
+
+~~# Archived!
+This repo no longer works as Taco Bell has implemented a much more aggressive policy that automatically adds domains to a blocklist for sending mail and rate limits IPs more, both of which makes debugging much harder. Using something like https://smailpro.com/ and manually creating accounts is probably the only solid alternative at the moment, but I might revisit this project in the future when I have more resources for proxies and domains.~~
 
 # Taco Bell Registration Bot
 An automated account registration and management tool for Taco Bell.
